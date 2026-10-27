@@ -1,0 +1,972 @@
+[
+  {
+    "type": "block_item",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "grab_pass",
+          "named": true
+        },
+        {
+          "type": "lod_decl",
+          "named": true
+        },
+        {
+          "type": "name_decl",
+          "named": true
+        },
+        {
+          "type": "pass_block",
+          "named": true
+        },
+        {
+          "type": "program_cg",
+          "named": true
+        },
+        {
+          "type": "program_cg_include",
+          "named": true
+        },
+        {
+          "type": "program_glsl",
+          "named": true
+        },
+        {
+          "type": "program_hlsl",
+          "named": true
+        },
+        {
+          "type": "program_hlsl_include",
+          "named": true
+        },
+        {
+          "type": "state_command",
+          "named": true
+        },
+        {
+          "type": "tags_block",
+          "named": true
+        },
+        {
+          "type": "use_pass",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "category_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "custom_editor",
+          "named": true
+        },
+        {
+          "type": "fallback",
+          "named": true
+        },
+        {
+          "type": "kw_category",
+          "named": true
+        },
+        {
+          "type": "properties_block",
+          "named": true
+        },
+        {
+          "type": "state_command",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "subshader_block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "command_arg",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "word",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "custom_editor",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_customeditor",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fallback",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_fallback",
+          "named": true
+        },
+        {
+          "type": "kw_off",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "grab_pass",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_grabpass",
+          "named": true
+        },
+        {
+          "type": "state_command",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "lod_decl",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_lod",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "name_decl",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_name",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "pass_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "block_item",
+          "named": true
+        },
+        {
+          "type": "kw_pass",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_def",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_define",
+          "named": true
+        },
+        {
+          "type": "preproc_rest",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_elif",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_elif",
+          "named": true
+        },
+        {
+          "type": "preproc_rest",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_else",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_else",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_endif",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_endif",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_if",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_if",
+          "named": true
+        },
+        {
+          "type": "preproc_rest",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_ifdef",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_ifdef",
+          "named": true
+        },
+        {
+          "type": "preproc_rest",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_ifndef",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_ifndef",
+          "named": true
+        },
+        {
+          "type": "preproc_rest",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_include",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_include",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preproc_undef",
+    "named": true,
+    "extra": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_undef",
+          "named": true
+        },
+        {
+          "type": "preproc_rest",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "program_cg",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_cgprogram",
+          "named": true
+        },
+        {
+          "type": "kw_endcg",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "program_cg_include",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_cginclude",
+          "named": true
+        },
+        {
+          "type": "kw_endcg",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "program_glsl",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_endglsl",
+          "named": true
+        },
+        {
+          "type": "kw_glslprogram",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "program_hlsl",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_endhlsl",
+          "named": true
+        },
+        {
+          "type": "kw_hlslprogram",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "program_hlsl_include",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_endhlsl",
+          "named": true
+        },
+        {
+          "type": "kw_hlslinclude",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "prop_value",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "word",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "properties_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_properties",
+          "named": true
+        },
+        {
+          "type": "property_decl",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "property_decl",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "dim_type",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "prop_value",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "word",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "shader_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "category_block",
+          "named": true
+        },
+        {
+          "type": "custom_editor",
+          "named": true
+        },
+        {
+          "type": "fallback",
+          "named": true
+        },
+        {
+          "type": "kw_shader",
+          "named": true
+        },
+        {
+          "type": "properties_block",
+          "named": true
+        },
+        {
+          "type": "state_command",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "subshader_block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "shader_block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "state_command",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "command_arg",
+          "named": true
+        },
+        {
+          "type": "state_command",
+          "named": true
+        },
+        {
+          "type": "word",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "subshader_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "block_item",
+          "named": true
+        },
+        {
+          "type": "kw_subshader",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tag_item",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tags_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_tags",
+          "named": true
+        },
+        {
+          "type": "tag_item",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "use_pass",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "kw_usepass",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "!",
+    "named": false
+  },
+  {
+    "type": "%",
+    "named": false
+  },
+  {
+    "type": "&",
+    "named": false
+  },
+  {
+    "type": "(",
+    "named": false
+  },
+  {
+    "type": ")",
+    "named": false
+  },
+  {
+    "type": "*",
+    "named": false
+  },
+  {
+    "type": "+",
+    "named": false
+  },
+  {
+    "type": ",",
+    "named": false
+  },
+  {
+    "type": "-",
+    "named": false
+  },
+  {
+    "type": ".",
+    "named": false
+  },
+  {
+    "type": "/",
+    "named": false
+  },
+  {
+    "type": ":",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
+    "named": false
+  },
+  {
+    "type": "^",
+    "named": false
+  },
+  {
+    "type": "comment",
+    "named": true,
+    "extra": true
+  },
+  {
+    "type": "dim_type",
+    "named": true
+  },
+  {
+    "type": "kw_category",
+    "named": true
+  },
+  {
+    "type": "kw_cginclude",
+    "named": true
+  },
+  {
+    "type": "kw_cgprogram",
+    "named": true
+  },
+  {
+    "type": "kw_customeditor",
+    "named": true
+  },
+  {
+    "type": "kw_define",
+    "named": true
+  },
+  {
+    "type": "kw_elif",
+    "named": true
+  },
+  {
+    "type": "kw_else",
+    "named": true
+  },
+  {
+    "type": "kw_endcg",
+    "named": true
+  },
+  {
+    "type": "kw_endglsl",
+    "named": true
+  },
+  {
+    "type": "kw_endhlsl",
+    "named": true
+  },
+  {
+    "type": "kw_endif",
+    "named": true
+  },
+  {
+    "type": "kw_fallback",
+    "named": true
+  },
+  {
+    "type": "kw_glslprogram",
+    "named": true
+  },
+  {
+    "type": "kw_grabpass",
+    "named": true
+  },
+  {
+    "type": "kw_hlslinclude",
+    "named": true
+  },
+  {
+    "type": "kw_hlslprogram",
+    "named": true
+  },
+  {
+    "type": "kw_if",
+    "named": true
+  },
+  {
+    "type": "kw_ifdef",
+    "named": true
+  },
+  {
+    "type": "kw_ifndef",
+    "named": true
+  },
+  {
+    "type": "kw_include",
+    "named": true
+  },
+  {
+    "type": "kw_lod",
+    "named": true
+  },
+  {
+    "type": "kw_name",
+    "named": true
+  },
+  {
+    "type": "kw_off",
+    "named": true
+  },
+  {
+    "type": "kw_pass",
+    "named": true
+  },
+  {
+    "type": "kw_properties",
+    "named": true
+  },
+  {
+    "type": "kw_shader",
+    "named": true
+  },
+  {
+    "type": "kw_subshader",
+    "named": true
+  },
+  {
+    "type": "kw_tags",
+    "named": true
+  },
+  {
+    "type": "kw_undef",
+    "named": true
+  },
+  {
+    "type": "kw_usepass",
+    "named": true
+  },
+  {
+    "type": "number",
+    "named": true
+  },
+  {
+    "type": "preproc_rest",
+    "named": true
+  },
+  {
+    "type": "string",
+    "named": true
+  },
+  {
+    "type": "word",
+    "named": true
+  },
+  {
+    "type": "{",
+    "named": false
+  },
+  {
+    "type": "|",
+    "named": false
+  },
+  {
+    "type": "}",
+    "named": false
+  }
+]

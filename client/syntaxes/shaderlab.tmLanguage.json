@@ -1,0 +1,163 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ShaderLab",
+  "scopeName": "source.shaderlab",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#program-block-hlsl" },
+    { "include": "#program-block-cg" },
+    { "include": "#program-block-glsl" },
+    { "include": "#properties-block" },
+    { "include": "#tags-block" },
+    { "include": "#stencil-block" },
+    { "include": "#shaderlab-keywords" },
+    { "include": "#state-commands" },
+    { "include": "#region-marker" },
+    { "include": "#preprocessor" },
+    { "include": "#strings" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.shaderlab",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.shaderlab",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "shaderlab-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.other.shaderlab",
+          "match": "(?i)^\\s*(Shader|SubShader|Pass|Category|Fallback|CustomEditor|UsePass|GrabPass)\\b"
+        },
+        {
+          "name": "storage.type.shaderlab",
+          "match": "(?i)\\b(Properties|Tags|Name|LOD)\\b"
+        }
+      ]
+    },
+    "properties-block": {
+      "name": "meta.properties.shaderlab",
+      "begin": "(?i)^\\s*(Properties)\\s*\\{",
+      "beginCaptures": { "1": { "name": "storage.type.shaderlab" } },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "variable.other.property.shaderlab",
+          "match": "[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        },
+        {
+          "name": "support.type.property-type.shaderlab",
+          "match": "(?i)\\b(2D|2DArray|3D|Cube|Color|Vector|Float|Range|Int|Rect)\\b"
+        },
+        { "include": "#strings" },
+        { "include": "#numbers" }
+      ]
+    },
+    "tags-block": {
+      "name": "meta.tags.shaderlab",
+      "begin": "(?i)^\\s*(Tags)\\s*\\{",
+      "beginCaptures": { "1": { "name": "storage.type.shaderlab" } },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#strings" }
+      ]
+    },
+    "stencil-block": {
+      "name": "meta.stencil.shaderlab",
+      "begin": "(?i)^\\s*(Stencil)\\s*\\{",
+      "beginCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "name": "keyword.other.stencil.shaderlab",
+          "match": "(?i)\\b(Ref|ReadMask|WriteMask|Comp|CompFront|CompBack|Pass|PassFront|PassBack|Fail|FailFront|FailBack|ZFail|ZFailFront|ZFailBack)\\b"
+        },
+        {
+          "name": "constant.language.stencil.shaderlab",
+          "match": "(?i)\\b(Zero|Keep|Replace|IncrSat|DecrSat|Invert|IncrWrap|DecrWrap|Never|Less|Equal|LessEqual|Greater|NotEqual|GreaterEqual|Always)\\b"
+        },
+        { "include": "#numbers" }
+      ]
+    },
+    "program-block-hlsl": {
+      "name": "meta.program.hlsl.shaderlab",
+      "begin": "(?i)^\\s*(HLSLPROGRAM|HLSLINCLUDE)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "end": "(?i)^\\s*(ENDHLSL)\\b",
+      "endCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "contentName": "meta.embedded.block.hlsl",
+      "patterns": [{ "include": "source.hlsl" }]
+    },
+    "program-block-cg": {
+      "name": "meta.program.cg.shaderlab",
+      "begin": "(?i)^\\s*(CGPROGRAM|CGINCLUDE)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "end": "(?i)^\\s*(ENDCG)\\b",
+      "endCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "contentName": "meta.embedded.block.hlsl",
+      "patterns": [{ "include": "source.hlsl" }]
+    },
+    "program-block-glsl": {
+      "name": "meta.program.glsl.shaderlab",
+      "begin": "(?i)^\\s*(GLSLPROGRAM)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "end": "(?i)^\\s*(ENDGLSL)\\b",
+      "endCaptures": { "1": { "name": "keyword.other.shaderlab" } },
+      "contentName": "meta.embedded.block.glsl",
+      "patterns": [{ "include": "source.glsl" }]
+    },
+    "state-commands": {
+      "patterns": [
+        {
+          "name": "keyword.other.state.shaderlab",
+          "match": "(?i)^\\s*(Cull|ZWrite|ZTest|ColorMask|Blend|BlendOp|Offset|Lighting|AlphaToMask|SeparateStencil|CameraRenderType|LogicOp|Fog|WriteMask|BlendOpAlpha)\\b"
+        },
+        {
+          "name": "constant.language.state.shaderlab",
+          "match": "(?i)\\b(Back|Front|Off|On|Less|Greater|Equal|NotEqual|Always|LEqual|GEqual|Never|One|Zero|SrcColor|OneMinusSrcColor|SrcAlpha|OneMinusSrcAlpha|DstAlpha|OneMinusDstAlpha|DstColor|OneMinusDstColor|SrcAlphaSaturate|Opaque|Transparent)\\b"
+        }
+      ]
+    },
+    "region-marker": {
+      "patterns": [
+        {
+          "name": "meta.regionMarker.shaderlab",
+          "match": "(?i)^(\\s*#\\s*(?:region|endregion)\\b)(.*)$",
+          "captures": {
+            "1": { "name": "keyword.other.region.shaderlab" },
+            "2": { "name": "entity.name.section.region.shaderlab" }
+          }
+        }
+      ]
+    },
+    "preprocessor": {
+      "name": "meta.preprocessor.shaderlab",
+      "match": "(?i)^\\s*#\\s*(include|pragma|define|undef|ifdef|ifndef|if|elif|else|endif)\\b.*$"
+    },
+    "strings": {
+      "name": "string.quoted.double.shaderlab",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.shaderlab",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.shaderlab",
+      "match": "[-+]?\\b[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?\\b"
+    }
+  }
+}

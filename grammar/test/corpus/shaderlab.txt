@@ -1,0 +1,461 @@
+====
+shader with properties and subshader pass
+====
+Shader "Custom/Demo"
+{
+    Properties
+    {
+        _MainTex("Texture", 2D) = "white" {}
+        _Color("Color", Color) = (1,1,1,1)
+        _Range("Range", Range(0, 1)) = 0.5
+    }
+    SubShader
+    {
+        Pass
+        {
+        }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (properties_block
+      (kw_properties)
+      (property_decl
+        (word)
+        (string)
+        (dim_type)
+        (prop_value
+          (string)))
+      (property_decl
+        (word)
+        (string)
+        (word)
+        (prop_value
+          (number)
+          (number)
+          (number)
+          (number)))
+      (property_decl
+        (word)
+        (string)
+        (word)
+        (number)
+        (number)
+        (prop_value
+          (number))))
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass))))))
+
+====
+tags block with string and number values
+====
+Shader "A"
+{
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "Queue" = "Geometry" }
+        LOD 200
+        Pass { }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (tags_block
+          (kw_tags)
+          (tag_item
+            (string)
+            (string))
+          (tag_item
+            (string)
+            (string))))
+      (block_item
+        (lod_decl
+          (kw_lod)
+          (number)))
+      (block_item
+        (pass_block
+          (kw_pass))))))
+
+====
+hlsl program block with include and endhlsl
+====
+Shader "B"
+{
+    SubShader
+    {
+        Pass
+        {
+            HLSLPROGRAM
+            #pragma vertex vert
+            float4 _MainTex_ST;
+            ENDHLSL
+        }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass)
+          (block_item
+            (program_hlsl
+              (kw_hlslprogram)
+              (kw_endhlsl))))))))
+
+====
+hlslinclude block
+====
+Shader "C"
+{
+    SubShader
+    {
+        HLSLINCLUDE
+        float _Global;
+        ENDHLSL
+        Pass { }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (program_hlsl_include
+          (kw_hlslinclude)
+          (kw_endhlsl)))
+      (block_item
+        (pass_block
+          (kw_pass))))))
+
+====
+shaderlab level include define and if
+====
+#include "Common.hlsl"
+#define _FEATURE_ON
+Shader "D"
+{
+    SubShader
+    {
+        #ifdef _FEATURE_ON
+        Pass { }
+        #endif
+    }
+}
+---
+
+(source_file
+  (preproc_include
+    (kw_include)
+    (string))
+  (preproc_def
+    (kw_define)
+    (preproc_rest))
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (preproc_ifdef
+        (kw_ifdef)
+        (preproc_rest))
+      (block_item
+        (pass_block
+          (kw_pass)))
+      (preproc_endif
+        (kw_endif)))))
+
+====
+cg program and cginclude blocks are recognized as boundaries only
+====
+Shader "E"
+{
+    SubShader
+    {
+        CGINCLUDE
+        sampler2D _MainTex;
+        ENDCG
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert
+            ENDCG
+        }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (program_cg_include
+          (kw_cginclude)
+          (kw_endcg)))
+      (block_item
+        (pass_block
+          (kw_pass)
+          (block_item
+            (program_cg
+              (kw_cgprogram)
+              (kw_endcg))))))))
+
+====
+state commands and stencil command block
+====
+Shader "F"
+{
+    SubShader
+    {
+        Pass
+        {
+            Cull Off
+            ZWrite On
+            Blend SrcAlpha OneMinusSrcAlpha
+            Stencil
+            {
+                Ref 255
+                Comp Always
+                Pass Replace
+            }
+        }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass)
+          (block_item
+            (state_command
+              (word)
+              (command_arg
+                (word))
+              (command_arg
+                (word))
+              (command_arg
+                (word))
+              (command_arg
+                (word))
+              (command_arg
+                (word))
+              (command_arg
+                (word))
+              (command_arg
+                (word))
+              (state_command
+                (word)
+                (command_arg
+                  (number))
+                (command_arg
+                  (word))
+                (command_arg
+                  (word))
+                (command_arg
+                  (word))
+                (command_arg
+                  (word))))))))))
+
+====
+fallback off and customeditor and usepass and grabpass
+====
+Shader "G"
+{
+    SubShader
+    {
+        UsePass "Legacy Shaders/Diffuse"
+        GrabPass { }
+        Pass { }
+    }
+    Fallback Off
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (use_pass
+          (kw_usepass)
+          (string)))
+      (block_item
+        (grab_pass
+          (kw_grabpass)))
+      (block_item
+        (pass_block
+          (kw_pass))))
+    (fallback
+      (kw_fallback)
+      (kw_off))))
+
+====
+keywords are case insensitive and property names are not keywords
+====
+shader "H"
+{
+    properties
+    {
+        Color("Color", Color) = (1,0,0,1)
+        _Name("Name", Float) = 1
+    }
+    SUBSHADER
+    {
+        pass
+        {
+            Tags { "Queue" = "Transparent" }
+        }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (properties_block
+      (kw_properties)
+      (property_decl
+        (word)
+        (string)
+        (word)
+        (prop_value
+          (number)
+          (number)
+          (number)
+          (number)))
+      (property_decl
+        (word)
+        (string)
+        (word)
+        (prop_value
+          (number))))
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass)
+          (block_item
+            (tags_block
+              (kw_tags)
+              (tag_item
+                (string)
+                (string)))))))))
+
+====
+category block and name decl
+====
+Shader "I"
+{
+    Category "Rendering"
+    {
+        SubShader
+        {
+            Pass
+            {
+                Name "Forward"
+            }
+        }
+    }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (category_block
+      (kw_category)
+      (string)
+      (subshader_block
+        (kw_subshader)
+        (block_item
+          (pass_block
+            (kw_pass)
+            (block_item
+              (name_decl
+                (kw_name)
+                (string)))))))))
+
+====
+comments and semicolons are extras
+====
+Shader "J"
+{
+    // line comment
+    /* block
+       comment */
+    SubShader { Pass { } }
+}
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (comment)
+    (comment)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass))))))
+
+====
+multiple shaders in one file
+====
+Shader "K1" { SubShader { Pass { } } }
+Shader "K2" { SubShader { Pass { } } }
+---
+
+(source_file
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass)))))
+  (shader_block
+    (kw_shader)
+    (string)
+    (subshader_block
+      (kw_subshader)
+      (block_item
+        (pass_block
+          (kw_pass))))))

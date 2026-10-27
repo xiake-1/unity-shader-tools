@@ -1,0 +1,75 @@
+/** T-003 / T-004：ShaderLab 外壳解析 + 程序块区间 + 虚拟 HLSL 文档的坐标一致性 */
+import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  parseShaderLab,
+  extractProgramBodies,
+  buildVirtualHlsl,
+  countErrorNodes,
+  walk,
+} from '../../server/src/parser';
+
+const FIXTURES = path.join(__dirname, '..', '..', 'grammar', 'examples');
+
+describe('ShaderLab 外壳解析', () => {
+  it('两个最小 fixture 无 ERROR 节点', () => {
+    for (const f of ['cg.shader', 'hlsl.shader']) {
+      const text = fs.readFileSync(path.join(FIXTURES, f), 'utf8');
+      const tree = parseShaderLab(text);
+      expect(countErrorNodes(tree.rootNode), f).toBe(0);
+    }
+  });
+
+  it('识别 Shader/SubShader/Pass/Properties/Tags 结构', () => {
+    const text = [
+      'Shader "A"',
+      '{',
+      '  Properties { _T("T", 2D) = "white" {} }',
+      '  SubShader',
+      '  {',
+      '    Tags { "RenderType" = "Opaque" }',
+      '    Pass { }',
+      '  }',
+      '}',
+    ].join('\n');
+    const tree = parseShaderLab(text);
+    expect(countErrorNodes(tree.rootNode)).toBe(0);
+    const types = new Set<string>();
+    walk(tree.rootNode, (n) => types.add(n.type));
+    for (const t of ['shader_block', 'properties_block', 'subshader_block', 'pass_block', 'tags_block']) {
+      expect(types.has(t), t).toBe(true);
+    }
+  });
+
+  it('程序块内容是一个整体叶子：块内 HLSL 语法错误不产生 ShaderLab ERROR', () => {
+    const text = `Shader "X"\n{\n  SubShader\n  {\n    Pass\n    {\n      CGPROGRAM\n      this is ((( not valid hlsl @@@\n      ENDCG\n    }\n  }\n}\n`;
+    const tree = parseShaderLab(text);
+    expect(countErrorNodes(tree.rootNode)).toBe(0);
+  });
+
+  it('HLSLPROGRAM / CGPROGRAM / CGINCLUDE / HLSLINCLUDE 边界都能识别', () => {
+    const text = `Shader "X"\n{\n  SubShader\n  {\n    CGINCLUDE\n    float a;\n    ENDCG\n    HLSLINCLUDE\n    float b;\n    ENDHLSL\n    Pass { CGPROGRAM\nfloat c;\nENDCG }\n  }\n}\n`;
+    const tree = parseShaderLab(text);
+    const bodies = extractProgramBodies(tree, text);
+    expect(bodies.length).toBe(3);
+    expect(bodies.map((b) => b.kind).sort()).toEqual(['cg', 'cg', 'hlsl']);
+    expect(countErrorNodes(tree.rootNode)).toBe(0);
+  });
+
+  it('虚拟 HLSL 文档与原文等长，程序块内坐标一一对应', () => {
+    const text = fs.readFileSync(path.join(FIXTURES, 'cg.shader'), 'utf8');
+    const tree = parseShaderLab(text);
+    const bodies = extractProgramBodies(tree, text);
+    const virtualText = buildVirtualHlsl(text, bodies);
+    expect(virtualText.length).toBe(text.length);
+
+    const body = bodies.find((b) => b.kind === 'cg')!;
+    // 块外内容被替换为空白，块内内容保持原样
+    expect(virtualText.slice(body.startByte, body.endByte)).toBe(
+      text.slice(body.startByte, body.endByte)
+    );
+    const before = virtualText.slice(0, body.startByte - 1);
+    expect(/[^\s]/.test(before)).toBe(false);
+  });
+});

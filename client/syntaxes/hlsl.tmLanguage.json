@@ -1,0 +1,149 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "HLSL (Unity subset)",
+  "scopeName": "source.hlsl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#preprocessor" },
+    { "include": "#unity-builtins" },
+    { "include": "#semantics" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#storage" },
+    { "include": "#macro-calls" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#functions" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.hlsl", "match": "//.*$" },
+        { "name": "comment.block.hlsl", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "meta.regionMarker.hlsl",
+          "match": "(?i)^(\\s*#\\s*(?:region|endregion)\\b)(.*)$",
+          "captures": {
+            "1": { "name": "keyword.other.region.hlsl" },
+            "2": { "name": "entity.name.section.region.hlsl" }
+          }
+        },
+        {
+          "name": "meta.preprocessor.include.hlsl",
+          "match": "(?i)^\\s*#\\s*(include|pragma)\\b.*$",
+          "captures": { "1": { "name": "keyword.control.directive.include.hlsl" } }
+        },
+        {
+          "name": "keyword.control.directive.conditional.hlsl",
+          "match": "(?i)^\\s*#\\s*(if|ifdef|ifndef|else|elif|endif|define|undef|undefine)\\b"
+        },
+        {
+          "name": "keyword.control.directive.hlsl",
+          "match": "(?i)^\\s*#\\s*(line|error|warning|pragma_once)\\b"
+        }
+      ]
+    },
+    "semantics": {
+      "patterns": [
+        {
+          "name": "support.type.semantic.hlsl",
+          "match": "(?i)\\bSV_[A-Z0-9_]+\\b"
+        },
+        {
+          "name": "support.type.semantic.hlsl",
+          "match": "(?i)\\b(POSITION|NORMAL|TANGENT|BINORMAL|TEXCOORD[0-9]*|COLOR[0-9]*|TARGET|FOG|DEPTH|VFACE|VPOS|INSTANCE_ID|COVERATE)\\b"
+        }
+      ]
+    },
+    "unity-builtins": {
+      "patterns": [
+        {
+          "name": "support.constant.unity.hlsl",
+          "match": "\\b(UNITY_[A-Za-z0-9_]+|unity_[A-Za-z0-9_]+)\\b"
+        },
+        {
+          "name": "support.variable.unity.hlsl",
+          "match": "\\b_(WorldSpaceLightPos[0-9]*|WorldSpaceCameraPos|LightColor0|LightPos[0-9]*|Time|SinTime[0-9]*|CosTime[0-9]*|TimeParameters|ProjectionParams|ScreenParams|ZBufferParams|OrthoProjectionParams|OrthoScreenParams|GlossyEnvironmentColor|AmbientSkyColor|AmbientEquatorColor|AmbientGroundColor|FogColor|FogParams|_DynamicGlobalShaderChannels)\\b"
+        },
+        {
+          "name": "support.type.unity.hlsl",
+          "match": "(?i)\\b(appdata(_base|_full|_v2f)?|a2f|v2f|surfInput|SurfaceOutput(Specular|Standard)?)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.hlsl",
+          "match": "(?i)\\b(if|else|for|while|do|break|continue|return|switch|case|default|discard)\\b"
+        },
+        {
+          "name": "keyword.other.hlsl",
+          "match": "(?i)\\b(struct|typedef|namespace|using|static|const|inline|extern|uniform|volatile|precise|groupshared|out|in|inout)\\b"
+        }
+      ]
+    },
+    "storage": {
+      "patterns": [
+        {
+          "name": "storage.modifier.hlsl",
+          "match": "(?i)\\b(const|static|inline|uniform|out|in|inout|row_major|column_major|extern|precise|groupshared)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.hlsl",
+          "match": "(?i)\\b(void|bool|half|h2|h3|h4|float|float1|float2|float3|float4|float2x2|float3x3|float4x4|min16float|min10float|min16int|min12int|min16uint|int|u?int(1|2|3|4)?|uint|fixed|fixed2|fixed3|fixed4|real|sampler|sampler1D|sampler2D|sampler3D|samplerCUBE|sampler_state|Texture1D|Texture2D|Texture3D|TextureCube|RWTexture1D|RWTexture2D|RWTexture3D|StructuredBuffer|RWStructuredBuffer|ByteAddressBuffer|RWByteAddressBuffer|Buffer|cbuffer|tbuffer)\\b"
+        }
+      ]
+    },
+    "macro-calls": {
+      "patterns": [
+        {
+          "name": "support.function.macro.hlsl",
+          "match": "(?i)\\b(TEXTURE2D\\w*|SAMPLER\\w*|CBUFFER_START|CBUFFER_END|UNITY_BEGIN|UNITY_END|UNITY_INSTANCING_BUFFER_START|UNITY_INSTANCING_BUFFER_END|UNITY_DECLARE_INSTANCING|UNITY_SETUP_INSTANCING|MH_START|MH_END|DYNAMIC_UNIFORM_BUFFER_START|DYNAMIC_UNIFORM_BUFFER_END)\\b(?=\\s*\\()"
+        },
+        {
+          "name": "support.function.unity.hlsl",
+          "match": "(?i)\\b(UnityObjectToClipPos|UnityWorldObjectToClip|UnityObjectToWorldDir|UnityObjectToWorldNormal|UnityWorldSpaceLightPos0|UnitySpecularIntensity|TransformWorldToHClip|TransformWorldToView|TransformObjectToWorld|TransformWorldToObject|mul|normalize|dot|cross|length|distance|reflect|refract|saturate|lerp|step|smoothstep|clamp|min|max|abs|sign|floor|ceil|frac|pow|exp|exp2|log|log2|sqrt|rsqrt|tex2D|tex2Dlod|texCUBE|SAMPLE_TEXTURE2D|LOAD_TEXTURE2D|TRANSFORM_TEX|ComputeScreenPos|GetLightAttenuation)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.hlsl",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.hlsl", "match": "\\\\." }]
+        },
+        {
+          "name": "string.quoted.other.include.hlsl",
+          "match": "(?i)^\\s*#\\s*include\\s+<[^>]*>"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hlsl",
+          "match": "\\b(0[xX][0-9a-fA-F]+|[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?)[fFhH]?\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.hlsl",
+          "match": "(?i)\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*\\()"
+        }
+      ]
+    }
+  }
+}
