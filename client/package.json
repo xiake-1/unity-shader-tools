@@ -1,0 +1,104 @@
+{
+  "name": "unity-shader-tools",
+  "displayName": "Unity Shader Tools",
+  "description": "Unity .shader/.hlsl language support (tree-sitter + LSP)",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "selfbuilt",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Programming Languages"],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:unityshader",
+    "onLanguage:hlsl",
+    "onLanguage:UnityShader",
+    "workspaceContains:**/*.shader",
+    "workspaceContains:**/*.hlsl"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "unityshader",
+        "aliases": ["Unity Shader", "ShaderLab"],
+        "extensions": [".shader"],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "hlsl",
+        "aliases": ["HLSL", "Cg"],
+        "extensions": [".hlsl", ".hlslinc", ".cginc"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "unityshader",
+        "scopeName": "source.shaderlab",
+        "path": "./syntaxes/shaderlab.tmLanguage.json"
+      },
+      {
+        "language": "hlsl",
+        "scopeName": "source.hlsl",
+        "path": "./syntaxes/hlsl.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "unityshader",
+        "path": "./snippets/shaderlab.code-snippets"
+      },
+      {
+        "language": "hlsl",
+        "path": "./snippets/shaderlab.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "unityshader.showIndexStats",
+        "title": "Unity Shader: Show Index Stats"
+      }
+    ],
+    "configuration": {
+      "title": "Unity Shader Tools",
+      "properties": {
+        "unityShader.trace": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "LSP 日志详细程度"
+        },
+        "unityShader.index": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否后台索引工程内/包内/内置符号"
+        },
+        "unityShader.maxIndexFileSize": {
+          "type": "number",
+          "default": 2097152,
+          "description": "单文件索引大小上限（字节），超出跳过并记日志"
+        },
+        "unityShader.unityEditorPath": {
+          "type": "string",
+          "default": "",
+          "description": "Unity Editor 安装目录（含 Data/CGIncludes）；留空则自动发现"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node20 --external:vscode --format=cjs --outfile=dist/extension.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

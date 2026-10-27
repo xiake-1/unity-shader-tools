@@ -1,0 +1,28 @@
+{
+  "name": "unity-shader-tools",
+  "version": "0.0.1",
+  "private": true,
+  "description": "VSCode extension: Unity Shader (.shader/.hlsl) language support via standard LSP + tree-sitter",
+  "workspaces": [
+    "client",
+    "server",
+    "grammar",
+    "test"
+  ],
+  "scripts": {
+    "build": "npm run build -w server && npm run build -w client",
+    "test": "vitest run",
+    "test:vscode": "node test/src/runTest.js",
+    "vscode:playground": "node test/src/playground.js",
+    "bench": "node test/bench/run.mjs",
+    "grammar:generate": "npm run generate -w grammar",
+    "grammar:test": "npm run test -w grammar"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
+  }
+}

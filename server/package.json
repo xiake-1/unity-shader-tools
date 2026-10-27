@@ -1,0 +1,22 @@
+{
+  "name": "unityshader-server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "LSP server for Unity Shader (tree-sitter parsing, Unity project discovery, include resolution, symbol index)",
+  "main": "out/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "shaderlab-grammar": "file:../grammar",
+    "tree-sitter": "^0.22.4",
+    "tree-sitter-hlsl": "^0.2.0",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

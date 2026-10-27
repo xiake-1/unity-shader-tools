@@ -1,0 +1,115 @@
+{
+  "Shader skeleton": {
+    "prefix": "shader",
+    "body": [
+      "Shader \"${1:Custom/Name}\"",
+      "{",
+      "\tProperties",
+      "\t{",
+      "\t\t${2:_MainTex}(\"${3:Main Tex}\", 2D) = \"white\" {}",
+      "\t}",
+      "",
+      "\tSubShader",
+      "\t{",
+      "\t\tTags { \"RenderType\" = \"${4:Opaque}\" }",
+      "\t\tLOD ${5:200}",
+      "",
+      "\t\tPass",
+      "\t\t{",
+      "\t\t\t${0}",
+      "\t\t}",
+      "\t}",
+      "",
+      "\tFallBack \"${6:Hidden/InternalErrorShader}\"",
+      "}"
+    ],
+    "description": "完整 ShaderLab 骨架"
+  },
+  "Pass with HLSL program": {
+    "prefix": "pass",
+    "body": [
+      "Pass",
+      "{",
+      "\tName \"${1:Forward}\"",
+      "\tTags { \"LightMode\" = \"${2:Forward}\" }",
+      "",
+      "\tHLSLPROGRAM",
+      "\t#pragma vertex ${3:vert}",
+      "\t#pragma fragment ${4:frag}",
+      "\t#include \"${5:UnityCG.cginc}\"",
+      "",
+      "\t${0}",
+      "\tENDHLSL",
+      "}"
+    ],
+    "description": "带 HLSLPROGRAM 的 Pass"
+  },
+  "Property entry": {
+    "prefix": "prop",
+    "body": ["${1:_Name}(\"${2:Label}\", ${3:Range}(0, 1)) = ${4:0.5}"],
+    "description": "Properties 条目"
+  },
+  "HLSL vertex/fragment pair": {
+    "prefix": "vf",
+    "body": [
+      "struct ${1:appdata}",
+      "{",
+      "\tfloat4 position : POSITION;",
+      "\tfloat3 normal : NORMAL;",
+      "\tfloat2 uv : TEXCOORD0;",
+      "};",
+      "",
+      "struct ${2:v2f}",
+      "{",
+      "\tfloat4 pos : SV_POSITION;",
+      "\tfloat2 uv : TEXCOORD0;",
+      "};",
+      "",
+      "${2:v2f} ${3:vert}(${1:appdata} v)",
+      "{",
+      "\t${2:v2f} o;",
+      "\to.pos = TransformObjectToHClip(v.position.xyz);",
+      "\to.uv = v.uv;",
+      "\treturn o;",
+      "}",
+      "",
+      "half4 ${4:frag}(${2:v2f} i) : SV_Target",
+      "{",
+      "\t${0}",
+      "}"
+    ],
+    "description": "顶点/片元函数对"
+  },
+  "URP material constants": {
+    "prefix": "cbuffer",
+    "body": [
+      "CBUFFER_START(UnityPerMaterial)",
+      "\tfloat4 ${1:_MainTex}_ST;",
+      "\t${0}",
+      "CBUFFER_END"
+    ],
+    "description": "CBUFFER 材质常量块"
+  },
+  "Texture and sampler declaration": {
+    "prefix": "tex",
+    "body": ["TEXTURE2D(${1:_MainTex});", "SAMPLER(sampler_${1:_MainTex});"],
+    "description": "纹理与采样器声明"
+  },
+  "Stencil block": {
+    "prefix": "stencil",
+    "body": [
+      "Stencil",
+      "{",
+      "\tRef ${1:255}",
+      "\tComp ${2:Always}",
+      "\tPass ${3:Replace}",
+      "}"
+    ],
+    "description": "Stencil 状态块"
+  },
+  "Shader feature keyword define": {
+    "prefix": "keyword",
+    "body": ["#pragma multi_compile_instancing", "#pragma shader_feature_local _${1:FEATURE}_ON"],
+    "description": "关键字编译指令"
+  }
+}

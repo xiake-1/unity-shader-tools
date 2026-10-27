@@ -1,0 +1,32 @@
+{
+  "name": "shaderlab-grammar",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Self-written Unity ShaderLab tree-sitter grammar (T-003)",
+  "main": "bindings/node",
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "compile": "node-gyp rebuild",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.shaderlab",
+      "file-types": [
+        "shader"
+      ],
+      "highlights": []
+    }
+  ],
+  "devDependencies": {
+    "node-gyp": "^13.0.0",
+    "tree-sitter-cli": "^0.25.0"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.2.1",
+    "node-gyp-build": "^4.8.2",
+    "tree-sitter": "^0.22.4",
+    "tree-sitter-hlsl": "^0.2.0"
+  }
+}

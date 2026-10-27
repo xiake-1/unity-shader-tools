@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+build/
+*.vsix
+grammar/src/parser.c
+.vscode-test/
+playground-profile/
+tree-sitter.exe
+.DS_Store

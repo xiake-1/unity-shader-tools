@@ -1,0 +1,17 @@
+{
+  "name": "unityshader-test",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Test harness: vitest unit tests, VS Code integration test, performance bench",
+  "scripts": {
+    "unit": "vitest run",
+    "vscode": "node src/runTest.js",
+    "bench": "node bench/run.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vscode/test-electron": "^2.4.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
