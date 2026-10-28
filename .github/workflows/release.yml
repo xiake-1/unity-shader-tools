@@ -1,0 +1,90 @@
+name: release
+
+# T-067：多平台原生件矩阵 + dxc 产物 + vsix 打包与体积口径。
+# 平台面沿用 ADR 0005 的 6 档（与上游 tree-sitter / tree-sitter-hlsl 的 prebuilds 同构）：
+# win32-x64 / win32-arm64 / linux-x64 / linux-arm64 / darwin-x64 / darwin-arm64。
+# 注意：`prebuildify` 不做交叉编译，每档都要在对应 runner 上编；win32-arm64 用 node-gyp 的
+# `--arch=arm64`（Windows runner 自带 ARM64 工具集），其余全是原生 runner。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win32-x64
+            os: windows-latest
+            archFlag: ''
+          - target: win32-arm64
+            os: windows-latest
+            archFlag: '--arch=arm64'
+          - target: linux-x64
+            os: ubuntu-latest
+            archFlag: ''
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+            archFlag: ''
+          - target: darwin-x64
+            os: macos-13
+            archFlag: ''
+          - target: darwin-arm64
+            os: macos-latest
+            archFlag: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      # parser.c 是生成物（.gitignore 忽略），每台 runner 自己生成（ADR 0007 的更正段）
+      - run: npm run grammar:generate
+      - run: npm run hlsl:generate
+      - name: prebuild grammar
+        working-directory: grammar
+        run: npx prebuildify --napi --strip ${{ matrix.archFlag }}
+      - name: prebuild hlsl (fork)
+        working-directory: hlsl
+        run: npx prebuildify --napi --strip ${{ matrix.archFlag }}
+      # 产物必须按目标平台命名，否则合并时会互相覆盖
+      - run: mv grammar/prebuilds grammar/prebuilds-out && mv hlsl/prebuilds hlsl/prebuilds-out
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-${{ matrix.target }}
+          path: |
+            grammar/prebuilds-out/**
+            hlsl/prebuilds-out/**
+
+  package:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'prebuilds-*'
+          path: .ci-prebuilds
+      - name: 合并 6 平台 prebuilds
+        run: node scripts/merge-prebuilds.mjs .ci-prebuilds
+      # dxc：ADR 0010 定「随扩展附带官方预编译」，win/linux 两档由脚本拉取并校验版本
+      - run: npm run dxc:fetch
+      - run: npm run build
+      - run: npm test
+      - name: 打包 vsix 并打印体积口径
+        run: node scripts/package.mjs | tee package-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: |
+            dist-vsix/*.vsix
+            package-report.json
