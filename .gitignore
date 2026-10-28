@@ -5,6 +5,12 @@ build/
 *.vsix
 grammar/src/parser.c
 hlsl/src/parser.c
+# MSVC 链接中间产物（binding.gyp 只从 src/parser.c + src/scanner.c 编译，这些纯副产物）
+*.obj
+*.lib
+*.exp
+*.iobj
+*.ipdb
 .vscode-test/
 playground-profile/
 tree-sitter.exe

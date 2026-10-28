@@ -46,7 +46,7 @@ updated: 2026-10-28
 | [0008-dead-branch-dimming-editor-log.md](decisions/0008-dead-branch-dimming-editor-log.md) | 死分支灰化：关键字取 Unity `Editor.log` 的 `Disabled keywords:`，求值在 server、呈现走 LSP 扩展通知 + 客户端装饰 | — |
 | [0009-syntax-diagnostics-error-exemption.md](decisions/0009-syntax-diagnostics-error-exemption.md) | 语法诊断误报控制：grammar 继续修 + ERROR 模式豁免表 + 官方语料零误报门槛测试 | — |
 
-（无取代关系。ADR 0005 结清 0001 留下的「native/WASM + 打包工具」未决项；ADR 0006 把 log 22:00 的语言 id 拆分登记为决策；ADR 0007 调整 0001 中「现成 tree-sitter-hlsl」的含义（现为本地 fork workspace 包），并要求 0005 的 prebuild 从 fork 出产物。ADR 0008 界定 0002 的「不造私有协议」＝不脱离 LSP 通道（`$/…` 扩展通知允许），并把「M6 桥是否取代 Editor.log 作关键字源」登记为未决项；ADR 0009 承接 0004 与 0007 的后果，只补「误报怎么控」。将来若支持 vscode.dev，需 WASM + 非 stdio 宿主，届时另立 ADR 取代 0005 与 0002 的相关部分。）
+（无取代关系。ADR 0005 结清 0001 留下的「native/WASM + 打包工具」未决项；ADR 0006 把 log 22:00 的语言 id 拆分登记为决策；ADR 0007 调整 0001 中「现成 tree-sitter-hlsl」的含义（现为本地 fork workspace 包），并要求 0005 的 prebuild 从 fork 出产物。ADR 0008 界定 0002 的「不造私有协议」＝不脱离 LSP 通道（`$/…` 扩展通知允许），并把「M6 桥是否取代 Editor.log 作关键字源」登记为未决项；ADR 0009 承接 0004 与 0007 的后果，只补「误报怎么控」。**更正（2026-10-28）**：ADR 0007 后果段写的「`parser.c`（约 20 MB）随仓库提交」与仓库实际不符——`.gitignore` 忽略 `grammar/src/parser.c` 与 `hlsl/src/parser.c`，两者均为生成物、由 `npm run grammar:generate` / `hlsl:generate` 重建（做法见 `hlsl/README.md`「重新生成 / 编译」）；MSVC 链接中间产物（`*.obj`/`*.lib`/`*.exp`）同样不入库。按规范 §3 旧 ADR 不改写，以本条为准。将来若支持 vscode.dev，需 WASM + 非 stdio 宿主，届时另立 ADR 取代 0005 与 0002 的相关部分。）
 
 ## 分析文档（`分析/`，只读证据，不参与状态流转）
 

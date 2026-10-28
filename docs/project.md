@@ -42,7 +42,7 @@ updated: 2026-10-27
 - 内置符号来源：索引真实源码（`Editor/Data/CGIncludes`、`Library/PackageCache/com.unity.render-pipelines.*`、`Packages/`、`Assets/`）
 - 测试：`vitest`（解析与索引单测）+ `@vscode/test-electron`（Provider 集成）
 - Unity 侧：C# Editor 包，目标 Unity 2022.3+
-- 打包与分发：client 用 esbuild bundle、server 用 tsc 不 bundle；grammar 与 tree-sitter 运行时以 **N-API prebuilds 随单一 VSIX 附带**（不在安装期编译、不走 WASM，见 ADR 0005）
+- 打包与分发：client 用 esbuild bundle、server 用 tsc 不 bundle；grammar 与 tree-sitter 运行时以 **N-API prebuilds 随单一 VSIX 附带**（不在安装期编译、不走 WASM，见 ADR 0005）；grammar 生成物（`grammar/src/parser.c`、`hlsl/src/parser.c`）与 MSVC 链接中间产物（`*.obj`/`*.lib`/`*.exp`）**不入库**，由 `npm run grammar:generate` / `hlsl:generate` + `hlsl:compile` 重建（见 `hlsl/README.md`）
 - 语言 id：`.shader` → `unityshader`，`.hlsl/.hlslinc/.cginc` → `hlsl`；与 VSTU 的 `UnityShader` 共存策略见 ADR 0006
 
 ## 总体设计原则
