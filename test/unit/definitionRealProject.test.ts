@@ -212,6 +212,56 @@ suite('T-018 真实工程三段跳转（真实 stdio LSP）', () => {
     client.notify('textDocument/didClose', { textDocument: { uri } });
   });
 
+  it('②b 内置：工程里 `appdata_base` 用法 → UnityCG.cginc 声明（grammar fork 补丁回归）', async () => {
+    // 2026-10-28 手动测试缺陷：struct 体内裸宏成员（UNITY_VERTEX_INPUT_INSTANCE_ID）让
+    // UnityCG.cginc 整文件级联 ERROR，appdata_base / UnityObjectToWorldNormal 从索引消失。
+    const files = listShaderFiles(path.join(PROJECT, 'Assets'));
+    let hit: { file: string; text: string; off: number } | null = null;
+    for (const f of files) {
+      const text = fs.readFileSync(f, 'utf8');
+      const off = usageOffset(text, 'appdata_base');
+      if (off >= 0) {
+        hit = { file: f, text, off };
+        break;
+      }
+    }
+    expect(hit, '真实工程里应有 appdata_base 的用法').not.toBeNull();
+    const { file, text, off } = hit!;
+    const uri = fileUri(file);
+    client.notify('textDocument/didOpen', {
+      textDocument: { uri, languageId: 'unityshader', version: 1, text },
+    });
+    const p = posAt(text, off);
+    const cgincUri = fileUri(CGINC).toLowerCase();
+    const r = await definitionUntil(uri, p.line, p.character, (locs) =>
+      locs.some((l) => l.uri.toLowerCase() === cgincUri)
+    );
+    const target = r.find((l) => l.uri.toLowerCase() === cgincUri);
+    expect(target, `appdata_base 应跳到 UnityCG.cginc，实际：${JSON.stringify(r)}`).toBeTruthy();
+    expect(textAt(target!)).toBe('appdata_base');
+    client.notify('textDocument/didClose', { textDocument: { uri } });
+  });
+
+  it('②c 内置：UnityCG.cginc 内 `UnityObjectToWorldNormal` 用法 → 同文件声明（fork 补丁回归）', async () => {
+    const text = fs.readFileSync(CGINC, 'utf8');
+    const uri = fileUri(CGINC);
+    client.notify('textDocument/didOpen', {
+      textDocument: { uri, languageId: 'hlsl', version: 1, text },
+    });
+    const re = /\bUnityObjectToWorldNormal\b/g;
+    const hits: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) hits.push(m.index);
+    expect(hits.length, 'UnityObjectToWorldNormal 在 UnityCG.cginc 内应有声明+用法').toBeGreaterThanOrEqual(2);
+    const p = posAt(text, hits[1]);
+    const r = await definitionUntil(uri, p.line, p.character, (locs) =>
+      locs.some((l) => l.uri.toLowerCase() === uri.toLowerCase() && textAt(l) === 'UnityObjectToWorldNormal')
+    );
+    const target = r.find((l) => l.uri.toLowerCase() === uri.toLowerCase() && textAt(l) === 'UnityObjectToWorldNormal');
+    expect(target, `应跳回 UnityCG.cginc 内声明（L177），实际：${JSON.stringify(r)}`).toBeTruthy();
+    client.notify('textDocument/didClose', { textDocument: { uri } });
+  });
+
   it('③ 包内：include URP 头文件 → `TransformWorldToHClip` → Library/PackageCache', async () => {
     const probeText = [
       '#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SpaceTransforms.hlsl"',

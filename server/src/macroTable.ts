@@ -68,3 +68,63 @@ export function macroKind(name: string): MacroDeclKind | undefined {
 export function isDeclarationMacro(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(DECLARATION_MACROS, name);
 }
+
+/** 已知声明宏的自写简述（T-025 文档兜底链：真实源码邻近注释 → 本表 → 空）。
+ *  文本自行整理，不复制对标产品或 Unity 文档原文（设计原则 6）。 */
+const MACRO_DESCRIPTIONS: Record<string, string> = {
+  TEXTURE2D: '声明一个 2D 纹理（如 `TEXTURE2D(_MainTex);`），配合 `SAMPLER`/`SAMPLE_TEXTURE2D` 使用。',
+  TEXTURE2D_ARRAY: '声明 2D 纹理数组。',
+  TEXTURE2D_CUBE: '声明立方体纹理。',
+  TEXTURE2D_MULTISAMPLE: '声明多重采样 2D 纹理（G-buffer 读取）。',
+  TEXTURE2D_FLOAT: '声明浮点格式 2D 纹理。',
+  TEXTURE2D_INT: '声明整型 2D 纹理。',
+  TEXTURE2D_UINT: '声明无符号整型 2D 纹理。',
+  TEXTURE2D_ARRAY_FLOAT: '声明浮点格式 2D 纹理数组。',
+  TEXTURE3D: '声明 3D 纹理。',
+  TEXTURE3D_FLOAT: '声明浮点格式 3D 纹理。',
+  TEXTURE1D: '声明 1D 纹理（查找表常用）。',
+  TEXTUREBUF: '声明结构化/原始缓冲。',
+  SAMPLER: '声明采样器状态（如 `SAMPLER(sampler_MainTex);`）。',
+  SAMPLER_CMP: '声明比较采样器（阴影贴常用）。',
+  SAMPLER_LINEAR: '声明线性过滤采样器。',
+  SAMPLER_MIN_POINT: '声明 min 过滤为点采样的采样器。',
+  SAMPLER_MAG_POINT: '声明 mag 过滤为点采样的采样器。',
+  SAMPLER_POINT: '声明点过滤采样器。',
+  TEXTURE2D_ARGS: '函数参数里成对声明纹理 + 采样器。',
+  TEXTURE2D_ARRAY_ARGS: '函数参数里成对声明纹理数组 + 采样器。',
+  TEXTURE3D_ARGS: '函数参数里成对声明 3D 纹理 + 采样器。',
+  UNITY_DECLARE_TEX2D: '旧式内置管线风格：成对声明 2D 纹理与采样器。',
+  UNITY_DECLARE_TEX2D_NOSAMPLER: '旧式：只声明 2D 纹理。',
+  UNITY_DECLARE_TEX2DARRAY: '旧式：成对声明 2D 纹理数组与采样器。',
+  UNITY_DECLARE_TEX2DARRAY_NOSAMPLER: '旧式：只声明 2D 纹理数组。',
+  UNITY_DECLARE_TEXCUBE: '旧式：成对声明立方体纹理与采样器。',
+  UNITY_DECLARE_TEXCUBE_NOSAMPLER: '旧式：只声明立方体纹理。',
+  UNITY_DECLARE_TEXCUBE_SHADOWS: '旧式：声明立方体阴影纹理组。',
+  UNITY_DECLARE_TEX3D: '旧式：成对声明 3D 纹理与采样器。',
+  UNITY_DECLARE_TEX3D_FLOAT: '旧式：成对声明浮点 3D 纹理与采样器。',
+  DECLARE_TEXTURE: '更旧的纹理 + 采样器成对声明宏。',
+  DECLARE_TEXTURE_ARRAY: '更旧的纹理数组成对声明宏。',
+  CBUFFER_START: '开始常量缓冲（如 `CBUFFER_START(UnityPerMaterial)`），URP 合批关键。',
+  CBUFFER_END: '结束常量缓冲。',
+  UNITY_INSTANCING_BUFFER_START: '开始 GPU 实例化属性缓冲。',
+  UNITY_INSTANCING_BUFFER_END: '结束 GPU 实例化属性缓冲。',
+  DYNAMIC_UNIFORM_BUFFER_START: '开始动态 uniform 缓冲（DX12/Vulkan）。',
+  DYNAMIC_UNIFORM_BUFFER_END: '结束动态 uniform 缓冲。',
+  MH_START: 'Material HDRP 属性缓冲开始。',
+  MH_END: 'Material HDRP 属性缓冲结束。',
+  UNITY_DEFINE_INSTANCED_PROP: '在实例化缓冲里定义一个逐实例属性。',
+  UNITY_INSTANCING_ARRAY_END: '结束实例化属性数组。',
+  // 高频采样/变换宏（真实源码里无邻近注释，补全文档走本表兜底）
+  SAMPLE_TEXTURE2D: '对 2D 纹理按 UV 采样：`SAMPLE_TEXTURE2D(tex, samplerTex, uv)`。',
+  SAMPLE_TEXTURE2D_LOD: '对 2D 纹理采样并指定 mip 层级。',
+  SAMPLE_TEXTURE2D_BIAS: '对 2D 纹理采样并施加 mip 偏移。',
+  SAMPLE_TEXTURE2D_ARRAY: '对 2D 纹理数组按 UV + 层号采样。',
+  SAMPLE_TEXTURECUBE: '对立方体纹理按方向向量采样。',
+  SAMPLE_TEX3D: '对 3D 纹理按坐标采样。',
+  LOAD_TEXTURE2D: '不经过采样器直接读取 2D 纹理的纹素。',
+  TRANSFORM_TEX: '按 `名称_ST` 对 UV 做 tiling/offset 变换（内置管线风格）。',
+};
+
+export function macroDescription(name: string): string | undefined {
+  return MACRO_DESCRIPTIONS[name];
+}

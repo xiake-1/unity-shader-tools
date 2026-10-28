@@ -3,7 +3,12 @@ const path = require('path');
 
 async function run() {
   // definition.test.js 必须在前：extension.test.js 的崩溃用例会永久杀掉 server
-  const cases = [require('./definition.test.js'), require('./extension.test.js')];
+  const cases = [
+    require('./definition.test.js'),
+    require('./completion.test.js'),
+    require('./rename.test.js'),
+    require('./extension.test.js'),
+  ];
   // 只跑名字包含该子串的用例（崩溃用例很慢，迭代时用它过滤）
   const filter = process.env.UNITYSHADER_TEST_FILTER || '';
   const failures = [];

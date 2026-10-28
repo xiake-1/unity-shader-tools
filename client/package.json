@@ -19,6 +19,14 @@
     "workspaceContains:**/*.hlsl"
   ],
   "contributes": {
+    "configurationDefaults": {
+      "[unityshader]": {
+        "editor.wordBasedSuggestions": "off"
+      },
+      "[hlsl]": {
+        "editor.wordBasedSuggestions": "off"
+      }
+    },
     "languages": [
       {
         "id": "unityshader",

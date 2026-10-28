@@ -41,6 +41,49 @@ async function main() {
     'm_EditorVersion: 2022.3.62f3c1\n',
     'utf8'
   );
+
+  // T-027 补全需要包内与内置符号：合成 PackageCache（render-pipelines.core 的 ShaderLibrary），
+  // 并用设置项把 Editor 路径指到本机安装（CGIncludes 兜底）。Editor 不存在时保持降级态，
+  // 相关用例自行跳过。
+  const editorPath =
+    process.env.UNITYSHADER_TEST_EDITOR || 'D:/Soft/Work/Unity/UnityEditor/2022.3.62f3c1/Editor';
+  const editorOk = fs.existsSync(path.join(editorPath, 'Data', 'CGIncludes'));
+  if (editorOk) {
+    fs.mkdirSync(path.join(ws, '.vscode'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ws, '.vscode', 'settings.json'),
+      JSON.stringify({ 'unityShader.unityEditorPath': editorPath }, null, 2) + '\n',
+      'utf8'
+    );
+  }
+  const pkgLib = path.join(
+    ws,
+    'Library',
+    'PackageCache',
+    'com.unity.render-pipelines.core@14.0.12',
+    'ShaderLibrary'
+  );
+  fs.mkdirSync(pkgLib, { recursive: true });
+  fs.writeFileSync(
+    path.join(pkgLib, 'SpaceTransforms.hlsl'),
+    [
+      '// Transforms position from world space to homogenous space',
+      'float4 TransformWorldToHClip(float3 positionWS)',
+      '{',
+      '    return float4(positionWS, 1.0);',
+      '}',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  fs.writeFileSync(
+    path.join(pkgLib, 'Macros.hlsl'),
+    [
+      '#define SAMPLE_TEXTURE2D(textureName, samplerName, coord2) TEXTURE2D_SAMPLE(textureName, samplerName, coord2)',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
   const shaderPath = path.join(ws, 'Assets', 'bench.shader');
   fs.writeFileSync(
     shaderPath,

@@ -7,6 +7,7 @@
     "client",
     "server",
     "grammar",
+    "hlsl",
     "test"
   ],
   "scripts": {
@@ -16,7 +17,10 @@
     "vscode:playground": "node test/src/playground.js",
     "bench": "node test/bench/run.mjs",
     "grammar:generate": "npm run generate -w grammar",
-    "grammar:test": "npm run test -w grammar"
+    "grammar:test": "npm run test -w grammar",
+    "hlsl:generate": "npm run generate -w hlsl",
+    "hlsl:compile": "npm run compile -w hlsl",
+    "hlsl:test": "npm run test -w hlsl"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

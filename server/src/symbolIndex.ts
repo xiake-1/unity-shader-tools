@@ -43,6 +43,8 @@ export interface SymbolInfo {
   name: string;
   kind: SymbolKind;
   locations: SymbolLocation[];
+  /** 声明上方邻近注释（M3 补全文档来源，T-021；无注释为 undefined） */
+  doc?: string;
 }
 
 export interface FileIndex {
@@ -51,6 +53,8 @@ export interface FileIndex {
   /** 原始 include 规格文本（未解析），由 includeResolver 解析 */
   includes: string[];
   errorCount: number;
+  /** 本文件贡献过字段的 struct 名（removeFile 时清理 structFields 用，T-023） */
+  structOwners: string[];
 }
 
 const HLSL_EXT = /\.(hlsl|hlslinc|cginc|compute|raytrace)$/i;
@@ -95,6 +99,16 @@ function declaredNames(node: Parser.SyntaxNode, out: Parser.SyntaxNode[]): void 
       out.push(c);
       continue;
     }
+    // `float4 q = expr;`：只收 `=` 左侧声明名；初始化表达式里的使用标识符不是声明
+    // （2026-10-28 修复：此前 `nosuchthing` 这类使用名被索引成 variable，污染 F12/补全）
+    if (c.type === 'init_declarator') {
+      for (const d of c.children) {
+        if (d.type === '=') break;
+        if (d.type === 'identifier' || d.type === 'field_identifier') out.push(d);
+        else declaredNames(d, out);
+      }
+      continue;
+    }
     declaredNames(c, out);
   }
 }
@@ -110,6 +124,34 @@ function parameterIdentifiers(node: Parser.SyntaxNode, out: Parser.SyntaxNode[])
     if (c.type === 'call_expression' || c.type === 'binary_expression') continue;
     parameterIdentifiers(c, out);
   }
+}
+
+/** 声明上方连续注释（T-021：补全文档来源）。
+ *  注释是 grammar 的 extra，在树里是声明的前一个兄弟；连续多行行注释与块注释都收。
+ *  输出为去掉注释符号的纯文本（markdown plain 展示够用）。 */
+function precedingComment(node: Parser.SyntaxNode): string | undefined {
+  const parts: string[] = [];
+  let cur: Parser.SyntaxNode | null = node.previousSibling;
+  while (cur && cur.type === 'comment') {
+    parts.unshift(cur.text);
+    cur = cur.previousSibling;
+  }
+  if (!parts.length) return undefined;
+  const lines: string[] = [];
+  for (const raw of parts) {
+    if (raw.startsWith('//')) {
+      lines.push(raw.slice(2).trim());
+      continue;
+    }
+    // 块注释：去掉 /* 与 */，行首的 * 对齐符
+    const body = raw.replace(/^\/\*/, '').replace(/\*\/$/, '');
+    for (const l of body.split('\n')) {
+      const t = l.replace(/^\s*\*+/, '').trim();
+      if (t) lines.push(t);
+    }
+  }
+  const text = lines.join('\n').trim();
+  return text.length ? text : undefined;
 }
 
 /** ShaderLab 层：Properties 属性 + include 规格 */
@@ -139,8 +181,8 @@ function extractHlsl(
   root: Parser.SyntaxNode,
   text: string,
   file: string
-): { symbols: Array<{ name: string; kind: SymbolKind; loc: SymbolLocation; viaMacro?: string }>; includes: string[] } {
-  const symbols: Array<{ name: string; kind: SymbolKind; loc: SymbolLocation; viaMacro?: string }> = [];
+): { symbols: Array<{ name: string; kind: SymbolKind; loc: SymbolLocation; viaMacro?: string; doc?: string }>; includes: string[] } {
+  const symbols: Array<{ name: string; kind: SymbolKind; loc: SymbolLocation; viaMacro?: string; doc?: string }> = [];
   const includes: string[] = [];
 
   walk(root, (n) => {
@@ -158,9 +200,17 @@ function extractHlsl(
         }
         break;
       }
-      case 'preproc_def': {
+      case 'preproc_def':
+      // 函数式宏（`#define SAMPLE_TEXTURE2D(t,s,uv) …`）是另一个节点——Unity 宏几乎都是这种形态
+      case 'preproc_function_def': {
         const id = n.children.find((c) => c.type === 'identifier');
-        if (id) symbols.push({ name: textOf(id, text), kind: 'macro', loc: loc(id, file) });
+        if (id)
+          symbols.push({
+            name: textOf(id, text),
+            kind: 'macro',
+            loc: loc(id, file),
+            doc: precedingComment(n),
+          });
         break;
       }
       case 'struct_specifier': {
@@ -190,7 +240,7 @@ function extractHlsl(
           if (cur.type === 'function_declarator') {
             const id = cur.children.find((c) => c.type === 'identifier');
             if (id) {
-              symbols.push({ name: textOf(id, text), kind: 'function', loc: loc(id, file) });
+              symbols.push({ name: textOf(id, text), kind: 'function', loc: loc(id, file), doc: precedingComment(n) });
               pushed = true;
             }
             continue;
@@ -262,17 +312,23 @@ function extractHlsl(
 export class SymbolIndex {
   private byName = new Map<string, SymbolInfo>();
   private byFile = new Map<string, FileIndex>();
+  /** 排序名表（前缀查询用），索引变化时置空惰性重建（T-021） */
+  private sortedNames: string[] | null = null;
+  /** struct 名 → 该 struct 的字段符号（T-023 成员补全） */
+  private structFields = new Map<string, SymbolInfo[]>();
 
   /** 索引一个文件；重复索引会先清除旧条目。
    *  传入已解析的 tree 可避免二次解析（编辑路径上 DocumentStore 已有增量树）。 */
   indexFile(file: string, text: string, preParsedTree?: Tree | null): FileIndex {
     this.removeFile(file);
+    this.sortedNames = null;
 
     const raw: Array<{
       name: string;
       kind: SymbolKind;
       loc: SymbolLocation;
       viaMacro?: string;
+      doc?: string;
     }> = [];
     const includes: string[] = [];
     let errorCount = 0;
@@ -300,6 +356,7 @@ export class SymbolIndex {
     }
 
     const symbols: SymbolInfo[] = [];
+    const owners = new Set<string>();
     for (const s of raw) {
       let info = this.byName.get(s.name);
       if (!info) {
@@ -311,6 +368,18 @@ export class SymbolIndex {
       if (info.kind !== s.kind && info.kind === 'variable' && s.kind === 'property') {
         info.kind = 'property';
       }
+      // 文档：取第一个带邻近注释的声明（跨文件同名不覆盖已有文档）
+      if (!info.doc && s.doc) info.doc = s.doc;
+      // struct 字段视图（T-023）：owner 来自字段 location 的标记
+      if (s.loc.owner) {
+        owners.add(s.loc.owner);
+        let arr = this.structFields.get(s.loc.owner);
+        if (!arr) {
+          arr = [];
+          this.structFields.set(s.loc.owner, arr);
+        }
+        if (!arr.includes(info)) arr.push(info);
+      }
     }
 
     const seen = new Set<string>();
@@ -321,7 +390,7 @@ export class SymbolIndex {
       symbols.push(info);
     }
 
-    const fi: FileIndex = { file, symbols, includes, errorCount };
+    const fi: FileIndex = { file, symbols, includes, errorCount, structOwners: [...owners] };
     this.byFile.set(file, fi);
     return fi;
   }
@@ -331,9 +400,25 @@ export class SymbolIndex {
     if (!old) return;
     for (const info of old.symbols) {
       info.locations = info.locations.filter((l) => l.file !== file);
-      if (info.locations.length === 0) this.byName.delete(info.name);
+      if (info.locations.length === 0) {
+        this.byName.delete(info.name);
+        this.sortedNames = null;
+      }
+    }
+    // struct 字段视图：只留仍有该 owner 字段 location 的条目（T-023）
+    for (const owner of old.structOwners) {
+      const arr = this.structFields.get(owner);
+      if (!arr) continue;
+      const kept = arr.filter((info) => info.locations.some((l) => l.owner === owner));
+      if (kept.length) this.structFields.set(owner, kept);
+      else this.structFields.delete(owner);
     }
     this.byFile.delete(file);
+  }
+
+  /** struct 的字段符号列表（T-023 成员补全） */
+  fieldsOfStruct(structName: string): SymbolInfo[] {
+    return this.structFields.get(structName) ?? [];
   }
 
   getByName(name: string): SymbolInfo | undefined {
@@ -354,6 +439,30 @@ export class SymbolIndex {
 
   names(): Iterable<string> {
     return this.byName.keys();
+  }
+
+  /** 按前缀查名（T-021，补全用）：大小写敏感、字典序、二分定位，不按键全表扫描。 */
+  queryByPrefix(prefix: string, limit = 300): SymbolInfo[] {
+    if (!this.sortedNames) this.sortedNames = [...this.byName.keys()].sort();
+    const names = this.sortedNames;
+    let lo = 0;
+    let hi = names.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (names[mid] < prefix) lo = mid + 1;
+      else hi = mid;
+    }
+    const out: SymbolInfo[] = [];
+    for (let i = lo; i < names.length && out.length < limit; i++) {
+      if (!names[i].startsWith(prefix)) break;
+      out.push(this.byName.get(names[i])!);
+    }
+    return out;
+  }
+
+  /** 全部已索引文件（T-028 occurrence 收集遍历用） */
+  fileNames(): Iterable<string> {
+    return this.byFile.keys();
   }
 
   get fileCount(): number {

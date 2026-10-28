@@ -1,0 +1,36 @@
+==============================
+struct 体内裸宏成员（fork 补丁）
+==============================
+
+struct appdata_base {
+    float4 vertex : POSITION;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+};
+
+---
+
+(translation_unit
+  (struct_specifier
+    name: (type_identifier)
+    body: (field_declaration_list
+      (field_declaration
+        type: (type_identifier)
+        declarator: (field_identifier)
+        (bitfield_clause (identifier)))
+      (macro_member (identifier)))))
+
+==============================
+跨行宏体内块注释（fork 补丁）
+==============================
+
+#define M(x) \
+    T g; /* note */ \
+    g.a = (x);
+
+---
+
+(translation_unit
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params (identifier))
+    value: (preproc_arg)))

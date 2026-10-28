@@ -1,0 +1,29 @@
+{
+  "name": "tree-sitter-hlsl",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Fork of tree-sitter-hlsl@0.2.0 (tree-sitter-grammars) + struct-body macro-member patch for Unity CGIncludes",
+  "main": "bindings/node",
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "compile": "node-gyp rebuild",
+    "test": "tree-sitter test"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.hlsl",
+      "file-types": ["hlsl", "hlslinc", "cginc"],
+      "highlights": []
+    }
+  ],
+  "dependencies": {
+    "node-addon-api": "^8.2.1",
+    "node-gyp-build": "^4.8.2"
+  },
+  "devDependencies": {
+    "node-gyp": "^13.0.0",
+    "tree-sitter-c": "^0.23.0",
+    "tree-sitter-cli": "^0.25.0",
+    "tree-sitter-cpp": "^0.23.0"
+  }
+}
