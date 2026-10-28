@@ -5,6 +5,10 @@ build/
 *.vsix
 grammar/src/parser.c
 hlsl/src/parser.c
+# DXC 预编译产物：由 `npm run dxc:fetch` 取（ADR 0010），与 parser.c 同构——下载物不入库，许可证与 VERSION 标记入库
+third_party/dxc/**/*.exe
+third_party/dxc/**/*.dll
+third_party/dxc/**/*.so
 # MSVC 链接中间产物（binding.gyp 只从 src/parser.c + src/scanner.c 编译，这些纯副产物）
 *.obj
 *.lib
@@ -15,3 +19,13 @@ hlsl/src/parser.c
 playground-profile/
 tree-sitter.exe
 .DS_Store
+
+# 发布产物（T-066/T-067）：prebuild 与 vsix 由 CI 矩阵产出，不入库
+grammar/prebuilds/
+hlsl/prebuilds/
+.package/
+dist-vsix/
+.ci-prebuilds/
+package-report.json
+# Linux 下的 dxc 无扩展名，上面的 *.exe/*.dll/*.so 兜不住（ADR 0010：下载物不入库）
+third_party/dxc/**/dxc

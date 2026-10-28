@@ -111,6 +111,19 @@ export function activate(context: vscode.ExtensionContext): void {
         keywordPollMs: settings.get<number>('keywordPollMs', 5000),
         keywordLogScanBytes: settings.get<number>('keywordLogScanBytes', 512 * 1024),
         branchDebounceMs: settings.get<number>('branchDebounceMs', 700),
+        // M5 类型诊断（规格 feature-type-diagnostics 范围 14；默认值与 `gate:type-diagnostics` 联动）
+        typeDiagnostics: settings.get<boolean>('typeDiagnostics', true),
+        dxcPath: settings.get<string>('dxcPath', ''),
+        dxcTimeoutMs: settings.get<number>('dxcTimeoutMs', 5000),
+        maxTypeDiagnosticsPerFile: settings.get<number>('maxTypeDiagnosticsPerFile', 100),
+        // M5 格式化（规格 feature-formatting 范围 7；默认值与 `gate:format` 联动）
+        formatting: {
+          enable: settings.get<boolean>('formatting.enable', true),
+          braceOnNewLine: settings.get<boolean>('formatting.braceOnNewLine', false),
+          macroMatchIndent: settings.get<boolean>('formatting.macroMatchIndent', true),
+          keepBlankLines: settings.get<number>('formatting.keepBlankLines', 1),
+        },
+        maxFormatFileSize: settings.get<number>('maxFormatFileSize', 1024 * 1024),
       },
     },
     // v9 要的是 ErrorHandler 实例（不是工厂）：传函数会让 closed() 变成 undefined，
@@ -283,6 +296,27 @@ export function activate(context: vscode.ExtensionContext): void {
         command: 'unityshader/__indexStats',
       });
       void vscode.window.showInformationMessage(`Unity Shader index: ${JSON.stringify(stats)}`);
+    }),
+    // M5 类型诊断：对当前文档强制重算（绕缓存；规格 feature-type-diagnostics 范围 9）
+    vscode.commands.registerCommand('unityshader.runTypeDiagnostics', async () => {
+      if (!client) return null;
+      const uri = activeFileUri();
+      const res = (await client.sendRequest('workspace/executeCommand', {
+        command: 'unityshader/runTypeDiagnostics',
+        arguments: uri ? [{ uri }] : [],
+      })) as { counts?: { produced?: number; skippedSyntaxError?: boolean; dxcMissing?: string | null }; state?: string } | null;
+      if (!res) return null;
+      if (res.state && res.state !== 'ok') {
+        void vscode.window.showInformationMessage(`Unity Shader 类型诊断不可用（${res.state}）：见 Output 面板 [dxc] 行`);
+      } else {
+        const n = res.counts?.produced ?? 0;
+        void vscode.window.showInformationMessage(
+          res.counts?.skippedSyntaxError
+            ? 'Unity Shader 类型诊断：文档有语法错误，已跳过 DXC（修好语法后自动恢复）'
+            : `Unity Shader 类型诊断：${n} 条`
+        );
+      }
+      return res;
     }),
     // 测试钩子：客户端连接状态（initial/starting/running/stopping/stopped/startFailed）
     vscode.commands.registerCommand('unityshader/__testClientState', () => lastState),

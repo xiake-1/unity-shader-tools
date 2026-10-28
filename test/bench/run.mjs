@@ -23,6 +23,10 @@ import { computeFileDiagnostics, treesForFile } from '../../server/out/diagnosti
 import { parseHlslFile } from '../../server/out/parser.js';
 import { collectInactiveRegions } from '../../server/out/inactiveRegions.js';
 import { UnityKeywordSource } from '../../server/out/unityKeywordSource.js';
+import { resolveDxc, probeDxc, compileUnit } from '../../server/out/dxcRunner.js';
+import { prepareTypeRun } from '../../server/out/typeDiagnostics.js';
+import { formatDocument } from '../../server/out/formatter.js';
+import { DEFAULT_FORMAT_SWITCHES, resolveIndentOptions } from '../../server/out/formatSettings.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
@@ -394,6 +398,117 @@ const cpuDelta = process.cpuUsage(cpuBefore);
 const cpuDeltaUs = cpuDelta.user + cpuDelta.system; // 微秒
 fs.rmSync(kwLog, { force: true });
 
+// ---- 9) M5 类型诊断：单编译单元 DXC 编译（T-058：P95 < 1500ms）----
+// 口径 = 规格 feature-type-diagnostics 的约束「单个编译单元 DXC 编译 P95 < 1500ms」。
+// 样本取语料里**最重的单个编译单元**（PackageCache 的 ShaderLibrary `.hlsl`，整文件一个单元）：
+// 本机语料的 52 个 `.shader` 全是 CGPROGRAM、零 HLSLPROGRAM，项目侧不产编译单元（见 status/log 的语料发现）。
+// dxc 不可用时该项记 `skipped`，不记 pass——门槛与基准都不能把「没测」当成「通过」。
+const dxcRes = resolveDxc({ moduleDir: path.join(root, 'server', 'out') });
+const dxcProbe = dxcRes.ok ? await probeDxc(dxcRes.path) : null;
+let dxcStatus = 'skipped';
+let dxcMedian = 0;
+let dxcP95 = 0;
+let dxcFile = null;
+let dxcUnitLines = 0;
+let dxcIssueCount = 0;
+if (dxcRes.ok && dxcProbe && dxcProbe.ok) {
+  const hlsl = sources
+    .filter((f) => /\.hlsl$/i.test(f))
+    .map((f) => ({ f, size: fs.statSync(f).size }))
+    .sort((a, b) => b.size - a.size)[0];
+  if (hlsl) {
+    dxcFile = hlsl.f;
+    const text = fs.readFileSync(hlsl.f, 'utf8');
+    const prepared = prepareTypeRun(hlsl.f, text, {
+      includeCtx: {
+        projectRoot: PROJECT,
+        cgIncludesDir: fs.existsSync(path.join(EDITOR, 'Data', 'CGIncludes'))
+          ? path.join(EDITOR, 'Data', 'CGIncludes')
+          : null,
+        packageCacheDir: fs.existsSync(path.join(PROJECT, 'Library', 'PackageCache'))
+          ? path.join(PROJECT, 'Library', 'PackageCache')
+          : null,
+      },
+      dxcVersion: dxcProbe.version ?? null,
+    });
+    const unit = prepared.units[0];
+    const plan = prepared.plans[0];
+    if (unit && plan && plan.failures.length === 0) {
+      dxcUnitLines = unit.endLine - unit.startLine + 1;
+      const ac = new AbortController();
+      const warm = await compileUnit({
+        exePath: dxcRes.path,
+        virtualText: plan.virtualText,
+        macros: prepared.macros,
+        includeRoots: plan.includeRoots,
+        timeoutMs: 20000,
+        label: 'bench-warm',
+        signal: ac.signal,
+      });
+      dxcStatus = warm.status;
+      const dxcSamples = [];
+      for (let k = 0; k < 10; k++) {
+        const t = performance.now();
+        const r = await compileUnit({
+          exePath: dxcRes.path,
+          virtualText: plan.virtualText,
+          macros: prepared.macros,
+          includeRoots: plan.includeRoots,
+          timeoutMs: 20000,
+          label: `bench-${k}`,
+          signal: new AbortController().signal,
+        });
+        dxcSamples.push(performance.now() - t);
+        dxcIssueCount = r.issues.length;
+        dxcStatus = r.status;
+      }
+      dxcSamples.sort((a, b) => a - b);
+      dxcMedian = dxcSamples[Math.floor(dxcSamples.length / 2)];
+      dxcP95 = dxcSamples[Math.floor(dxcSamples.length * 0.95) - 1] ?? dxcSamples[dxcSamples.length - 1];
+    }
+  }
+}
+
+// ---- 10) M5 格式化：2001 行文档（T-065）----
+// 口径 = 规格 feature-formatting 的性能约束。两种形状都量，因为代价差一个量级：
+// ① **ShaderLab 为主**（Properties + Pass + `CGPROGRAM` 原样块）= 本机语料里 `.shader` 的真实形状；
+// ② **HLSL 区域为主** = 最坏情况（HLSL 正文要单独解析并建行模型，且三条硬断言要求整条流水线跑两遍）。
+// 见 ADR 0013：双遍复验是硬断言 ①② 的必要代价，预算按形状分别给。
+function buildFmtDoc(hlslHeavy) {
+  const L = ['Shader "Bench/Big"', '{', '  Properties', '  {'];
+  for (let i = 0; L.length < 504; i++) L.push(`_P${i}("P${i}", Float) = ${i % 5}`);
+  L.push('  }', 'SubShader', '{', 'Pass', '{', 'Blend   SrcAlpha    OneMinusSrcAlpha');
+  L.push(hlslHeavy ? 'HLSLPROGRAM' : 'CGPROGRAM');
+  while (L.length < 1996) {
+    const k = L.length;
+    L.push(k % 7 === 0 ? `    float4 v${k} = float4(${k % 3}, 0.5, 1.0, 0.0);` : `   o += v${k - 1} * 0.5;`);
+  }
+  L.push(hlslHeavy ? 'ENDHLSL' : 'ENDCG', '}', '}', '}', '');
+  return L.join('\n');
+}
+const fmtIndent = resolveIndentOptions({ tabSize: 4, insertSpaces: true });
+function measureFormat(text) {
+  const probe = formatDocument({ file: 'bench/big.shader', text, indent: fmtIndent, switches: DEFAULT_FORMAT_SWITCHES });
+  if (probe.text === null) return { lines: 0, median: 0, p95: 0, changedBytes: 0, verbatimBytes: 0 };
+  formatDocument({ file: 'bench/big.shader', text: probe.text, indent: fmtIndent, switches: DEFAULT_FORMAT_SWITCHES }); // 预热
+  const s = [];
+  for (let k = 0; k < 10; k++) {
+    const t = performance.now();
+    formatDocument({ file: 'bench/big.shader', text, indent: fmtIndent, switches: DEFAULT_FORMAT_SWITCHES });
+    s.push(performance.now() - t);
+  }
+  s.sort((a, b) => a - b);
+  return {
+    lines: text.split('\n').length,
+    median: s[Math.floor(s.length / 2)],
+    p95: s[Math.floor(s.length * 0.95) - 1] ?? s[s.length - 1],
+    changedBytes: probe.changedBytes,
+    verbatimBytes: probe.verbatimBytes,
+  };
+}
+const fmtShell = measureFormat(buildFmtDoc(false));
+const fmtHlsl = measureFormat(buildFmtDoc(true));
+
 const results = [
   { name: '冷启动全量索引', value: coldMs, limit: 3000, unit: 'ms' },
   { name: '增量编辑（中位数）', value: medianMs, limit: 100, unit: 'ms' },
@@ -412,11 +527,42 @@ const results = [
   { name: `死分支求值（${deadText.split('\n').length} 行，中位数）`, value: deadMedian, limit: 150, unit: 'ms' },
   { name: `死分支求值（${deadText.split('\n').length} 行，p95）`, value: deadP95, limit: 150, unit: 'ms' },
   { name: '关键字轮询空转（200 次，CPU 时间）', value: cpuDeltaUs / 1000, limit: 20, unit: 'ms' },
+  {
+    name: `单编译单元 DXC 编译（${dxcUnitLines} 行，中位数）`,
+    value: dxcMedian,
+    limit: 1500,
+    unit: 'ms',
+    // dxc 不可用时记 null（跳过），不能让「没测」变成「通过」
+    pass: dxcStatus === 'skipped' ? null : dxcMedian < 1500,
+  },
+  {
+    name: `单编译单元 DXC 编译（${dxcUnitLines} 行，p95）`,
+    value: dxcP95,
+    limit: 1500,
+    unit: 'ms',
+    pass: dxcStatus === 'skipped' ? null : dxcP95 < 1500,
+  },
+  {
+    name: `格式化（ShaderLab 为主 ${fmtShell.lines} 行，p95）`,
+    value: fmtShell.p95,
+    limit: 150,
+    unit: 'ms',
+    // 排版返回 null（结构不足）时记 null，不能让「没排版」变成「排得快」
+    pass: fmtShell.lines === 0 ? null : fmtShell.p95 < 150,
+  },
+  {
+    name: `格式化（HLSL 区域为主 ${fmtHlsl.lines} 行，p95）`,
+    value: fmtHlsl.p95,
+    limit: 250,
+    unit: 'ms',
+    // 最坏形状：HLSL 正文单独解析 + 双遍复验（ADR 0013）
+    pass: fmtHlsl.lines === 0 ? null : fmtHlsl.p95 < 250,
+  },
   { name: '补全后索引规模变化（应为 0）', value: compIndexDelta, limit: 1, unit: 'files' },
   { name: 'F12 后索引规模变化（应为 0）', value: indexDelta, limit: 1, unit: 'files' },
   { name: '索引后 RSS', value: rssAfterIndex, limit: 500, unit: 'MB' },
   { name: '结束时 RSS', value: rssEnd, limit: 500, unit: 'MB' },
-].map((r) => ({ ...r, pass: r.value < r.limit }));
+].map((r) => ({ ...r, pass: 'pass' in r ? r.pass : r.value < r.limit }));
 
 console.log(
   JSON.stringify(
@@ -463,6 +609,32 @@ console.log(
         p95: +deadP95.toFixed(2),
         keywordIdleCpuMs: +(cpuDeltaUs / 1000).toFixed(2),
       },
+      typeDiagnostics: {
+        dxc: dxcRes.ok ? dxcRes.source : `missing:${dxcRes.reason}`,
+        version: dxcProbe && dxcProbe.ok ? dxcProbe.version : null,
+        sampleFile: dxcFile,
+        unitLines: dxcUnitLines,
+        status: dxcStatus,
+        issues: dxcIssueCount,
+        median: +dxcMedian.toFixed(2),
+        p95: +dxcP95.toFixed(2),
+      },
+      formatting: {
+        shellShaped: {
+          lines: fmtShell.lines,
+          changedBytes: fmtShell.changedBytes,
+          verbatimBytes: fmtShell.verbatimBytes,
+          median: +fmtShell.median.toFixed(2),
+          p95: +fmtShell.p95.toFixed(2),
+        },
+        hlslHeavy: {
+          lines: fmtHlsl.lines,
+          changedBytes: fmtHlsl.changedBytes,
+          verbatimBytes: fmtHlsl.verbatimBytes,
+          median: +fmtHlsl.median.toFixed(2),
+          p95: +fmtHlsl.p95.toFixed(2),
+        },
+      },
       results: results.map((r) => ({
         name: r.name,
         value: +r.value.toFixed(2),
@@ -475,7 +647,11 @@ console.log(
   )
 );
 
-const failed = results.filter((r) => !r.pass);
+const failed = results.filter((r) => r.pass === false);
+const skipped = results.filter((r) => r.pass === null);
+if (skipped.length) {
+  console.error('bench SKIPPED（环境缺件，不计入通过）: ' + skipped.map((s) => s.name).join('; '));
+}
 if (failed.length) {
   console.error('bench FAILED: ' + failed.map((f) => `${f.name}=${f.value.toFixed(1)} (limit ${f.limit}${f.unit})`).join('; '));
   process.exit(1);

@@ -1,0 +1,10 @@
+# 打包期排除项（vsce）。注意：`scripts/package.mjs` 会在暂存目录里放**运行时依赖闭包**
+# （server 不 bundle，`node-gyp-build` 靠 `__dirname` 找 prebuilds，见 ADR 0005），
+# 所以这里**不能**忽略 `node_modules/**`；只排除开发期文件。
+src/**
+tsconfig.json
+**/*.ts
+**/*.map
+.vscode-test/**
+.git/**
+*.vsix

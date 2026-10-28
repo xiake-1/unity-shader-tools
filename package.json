@@ -18,11 +18,16 @@
     "bench": "node test/bench/run.mjs",
     "audit:errors": "node test/corpus/errorAudit.mjs",
     "gate:diagnostics": "node test/corpus/diagnosticsGate.mjs",
+    "gate:type-diagnostics": "node test/corpus/typeDiagnosticsGate.mjs",
+    "dxc:fetch": "node scripts/fetch-dxc.mjs",
     "grammar:generate": "npm run generate -w grammar",
     "grammar:test": "npm run test -w grammar",
     "hlsl:generate": "npm run generate -w hlsl",
     "hlsl:compile": "npm run compile -w hlsl",
-    "hlsl:test": "npm run test -w hlsl"
+    "hlsl:test": "npm run test -w hlsl",
+    "gate:format": "node test/corpus/formatGate.mjs",
+    "prebuild": "npm run prebuild -w grammar && npm run prebuild -w hlsl",
+    "package": "node scripts/package.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

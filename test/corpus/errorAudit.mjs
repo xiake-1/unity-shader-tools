@@ -14,58 +14,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseHlslFile, parseShaderLab, extractProgramBodies, buildVirtualHlsl } from '../../server/out/parser.js';
 import { normalizeShape } from '../../server/out/errorExemption.js';
+import { collectCorpus } from './corpus.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 
-const PROJECT = process.env.BENCH_PROJECT ?? 'D:/Work/Unity/ShaderStudy';
-const EDITOR = process.env.BENCH_EDITOR ?? 'D:/Soft/Work/Unity/UnityEditor/2022.3.62f3c1/Editor';
-
 const HLSL_EXT = /\.(hlsl|hlslinc|cginc)$/i;
-const SHADER_EXT = /\.(shader|hlsl|hlslinc|cginc)$/i;
-
-function listFiles(dir, limit = 5000) {
-  const out = [];
-  const stack = [dir];
-  while (stack.length && out.length < limit) {
-    const d = stack.pop();
-    let entries;
-    try {
-      entries = fs.readdirSync(d, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      const full = path.join(d, e.name);
-      if (e.isDirectory()) {
-        if (e.name === 'Temp' || e.name === 'obj' || e.name === '.git') continue;
-        stack.push(full);
-      } else if (SHADER_EXT.test(e.name)) out.push(full);
-    }
-  }
-  return out;
-}
-
-/** 语料分三源，逐源统计（roadmap M4 的「80+ 包内 / 56 内置 / 50 工程」口径） */
-function collectCorpus() {
-  const groups = { project: [], packageCache: [], cgIncludes: [] };
-  if (fs.existsSync(PROJECT)) {
-    groups.project.push(...listFiles(path.join(PROJECT, 'Assets')));
-    const pc = path.join(PROJECT, 'Library', 'PackageCache');
-    if (fs.existsSync(pc)) {
-      for (const e of fs.readdirSync(pc)) {
-        if (!/^com\.unity\.render-pipelines\./i.test(e)) continue;
-        const lib = path.join(pc, e, 'ShaderLibrary');
-        if (fs.existsSync(lib)) groups.packageCache.push(...listFiles(lib));
-      }
-    }
-  }
-  const cginc = path.join(EDITOR, 'Data', 'CGIncludes');
-  if (fs.existsSync(cginc)) {
-    for (const e of fs.readdirSync(cginc)) if (SHADER_EXT.test(e)) groups.cgIncludes.push(path.join(cginc, e));
-  }
-  return groups;
-}
 
 /** 文本 → 模式签名：直接用豁免表的 normalizeShape（同一口径，不造两套） */
 const normalizeSnippet = (text, limit = 90) => normalizeShape(text, limit);

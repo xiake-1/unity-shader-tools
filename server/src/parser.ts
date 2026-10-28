@@ -115,6 +115,42 @@ export function walk(node: SyntaxNode, fn: (n: SyntaxNode) => void): void {
   for (const c of node.children) walk(c, fn);
 }
 
+/**
+ * 游标版遍历：不物化 `children` 数组。
+ * 实测：2001 行文档上 `walk` 的 `node.children` 是格式化 123ms 的大头
+ * （每个节点都新建一批 SyntaxNode 包装），热路径（格式化、token 比对）必须用这个。
+ */
+export function walkNodes(node: SyntaxNode, fn: (n: SyntaxNode) => void): void {
+  const c = node.walk();
+  outer: for (;;) {
+    fn(c.currentNode);
+    if (c.gotoFirstChild()) continue outer;
+    for (;;) {
+      if (c.gotoNextSibling()) continue outer;
+      if (!c.gotoParent()) break outer;
+    }
+  }
+}
+
+/** 游标版叶子收集（前序、按源码顺序，无需再排序） */
+export function collectLeafNodes(root: SyntaxNode): SyntaxNode[] {
+  const out: SyntaxNode[] = [];
+  const c = root.walk();
+  if (!c.gotoFirstChild()) {
+    out.push(root);
+    return out;
+  }
+  for (;;) {
+    const n = c.currentNode;
+    if (c.gotoFirstChild()) continue;
+    out.push(n);
+    for (;;) {
+      if (c.gotoNextSibling()) break;
+      if (!c.gotoParent()) return out;
+    }
+  }
+}
+
 /** 错误节点判定：ERROR 或 MISSING。
  *  **MISSING 节点的 `type` 是缺失的 token 名（`;`、`}`、`#endif`…），`isMissing` 为 true；
  *  `type === 'MISSING'` 永远不成立** —— 2026-10-28 T-034 实测修正：此前的写法让 MISSING

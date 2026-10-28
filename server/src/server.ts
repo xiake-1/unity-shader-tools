@@ -22,7 +22,7 @@ import { DocumentStore } from './documentStore';
 import { SymbolIndex } from './symbolIndex';
 import { discoverUnityEnvironment, type UnityEnvironment } from './unityProject';
 import { resolveInclude, type IncludeContext } from './includeResolver';
-import { isGeneratedFile } from './tempFiles';
+import { isGeneratedFile, isCgSource } from './tempFiles';
 import { provideDefinition } from './definition';
 import { provideCompletion } from './completion';
 import { provideHover } from './hover';
@@ -37,6 +37,27 @@ import {
 import { ExemptionTable } from './errorExemption';
 import { UnityKeywordSource, keywordHealthLine } from './unityKeywordSource';
 import { collectInactiveRegions, type InactiveRegion } from './inactiveRegions';
+import { Diagnostic, DiagnosticSeverity, TextEdit, Range, Position } from 'vscode-languageserver';
+import {
+  TypeDiagnosticsProvider,
+  typeDiagnosticLogLine,
+  type TypeCounts,
+  DEFAULT_MAX_TYPE_DIAGNOSTICS_PER_FILE,
+} from './typeDiagnostics';
+import { resolveDxc, probeDxc, dxcHealthLine, type DxcResolved, type DxcProbe, type DxcResolution } from './dxcRunner';
+import { DxcExemptionTable } from './dxcExemption';
+import {
+  formatDocument,
+  formatHealthLine,
+  isHlslSource,
+  DEFAULT_MAX_FORMAT_FILE_SIZE,
+} from './formatter';
+import {
+  DEFAULT_FORMAT_SWITCHES,
+  normalizeFormatSwitches,
+  resolveIndentOptions,
+  type FormatSwitches,
+} from './formatSettings';
 
 interface Settings {
   trace: 'off' | 'messages' | 'verbose';
@@ -52,6 +73,14 @@ interface Settings {
   keywordPollMs: number;
   keywordLogScanBytes: number;
   branchDebounceMs: number;
+  // M5 类型诊断（规格 feature-type-diagnostics 范围 14）
+  typeDiagnostics: boolean;
+  dxcPath: string;
+  dxcTimeoutMs: number;
+  maxTypeDiagnosticsPerFile: number;
+  // M5 格式化（规格 feature-formatting 范围 7：专属 4 开关；缩进宽度走 FormattingOptions）
+  formatting: FormatSwitches;
+  maxFormatFileSize: number;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -67,6 +96,16 @@ const DEFAULT_SETTINGS: Settings = {
   keywordPollMs: 5000,
   keywordLogScanBytes: 512 * 1024,
   branchDebounceMs: 700,
+  // 默认值与 `npm run gate:type-diagnostics` 的门槛结果联动（规格范围 12）：
+  // 门槛 PASS（三源语料类型诊断总数 = 0）→ 默认 true；门槛 FAIL → 必须改回 false。
+  typeDiagnostics: true,
+  dxcPath: '',
+  dxcTimeoutMs: 5000,
+  maxTypeDiagnosticsPerFile: DEFAULT_MAX_TYPE_DIAGNOSTICS_PER_FILE,
+  // 默认值与 `npm run gate:format` 的门槛结果联动（规格 feature-formatting 范围 9）：
+  // 门槛 PASS → true；门槛 FAIL → 必须改回 false（server 也就不宣告 documentFormattingProvider）
+  formatting: DEFAULT_FORMAT_SWITCHES,
+  maxFormatFileSize: DEFAULT_MAX_FORMAT_FILE_SIZE,
 };
 
 /** 客户端在 `initialize` 的 `capabilities.experimental` 里声明支持时才发通知（规格范围 6） */
@@ -190,10 +229,27 @@ export function start(): void {
   const diagTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 发布次数计数器：集成测试据此断言防抖（连续 5 次 didChange 只发 1 次） */
   let diagPublishes = 0;
+  /** 格式化请求与产出计数（`__indexStats` 与集成测试用） */
+  let formatRequests = 0;
+  let formatVerbatimBytes = 0;
+  let formatChangedBytes = 0;
+  /** 语法诊断与类型诊断**共用同一次 publishDiagnostics**（规格约束：合并推送、不互相覆盖残留） */
+  const syntaxDiags = new Map<string, Diagnostic[]>();
+  const typeDiags = new Map<string, Diagnostic[]>();
 
   const pathToUri = (p: string): string => {
     const slash = p.replace(/\\/g, '/');
     return /^([a-zA-Z]):/.test(slash) ? `file:///${encodeURI(slash)}` : `file://${encodeURI(slash)}`;
+  };
+
+  /** 合并两类诊断后一次发布（谁后算完都不覆盖另一方的结果） */
+  const publishMerged = (file: string): void => {
+    const uri = openUris.get(file) ?? pathToUri(file);
+    diagPublishes++;
+    connection.sendDiagnostics({
+      uri,
+      diagnostics: [...(syntaxDiags.get(file) ?? []), ...(typeDiags.get(file) ?? [])],
+    });
   };
 
   /** 立即计算并发布（`didOpen`/`didSave`/`didChangeWatchedFiles` 走这里，规格范围 6） */
@@ -214,11 +270,10 @@ export function start(): void {
         return;
       }
     }
-    const uri = openUris.get(file) ?? pathToUri(file);
     if (!settings.syntaxDiagnostics && !settings.includeDiagnostics) {
-      // 两个开关都关：清空旧诊断，不残留（规格异常表）
-      diagPublishes++;
-      connection.sendDiagnostics({ uri, diagnostics: [] });
+      // 两个开关都关：清空旧语法诊断，不残留（规格异常表）
+      syntaxDiags.delete(file);
+      publishMerged(file);
       return;
     }
     const res = computeFileDiagnostics(treesForFile(file, text), {
@@ -229,8 +284,8 @@ export function start(): void {
       syntaxDiagnostics: settings.syntaxDiagnostics,
       includeDiagnostics: settings.includeDiagnostics,
     });
-    diagPublishes++;
-    connection.sendDiagnostics({ uri, diagnostics: res.diagnostics });
+    syntaxDiags.set(file, res.diagnostics);
+    publishMerged(file);
     log(diagnosticLogLine(file, res.counts));
   };
 
@@ -259,6 +314,8 @@ export function start(): void {
       clearTimeout(t);
       diagTimers.delete(file);
     }
+    syntaxDiags.delete(file);
+    typeDiags.delete(file);
     connection.sendDiagnostics({ uri: uri ?? pathToUri(file), diagnostics: [] });
   };
 
@@ -349,6 +406,114 @@ export function start(): void {
     pollTimer = setInterval(() => refreshKeywords(false), Math.max(1000, settings.keywordPollMs));
   };
 
+  // ---- M5 类型诊断（DXC）（T-056，规格 feature-type-diagnostics；ADR 0010）----
+
+  /** dxc 定位结果与版本。定位失败 → 零类型诊断 + 一次性提示 + 日志 `dxc=missing`（规格范围 4 + 异常表） */
+  const dxcState: {
+    /** `resolveDxc` 的原始结果（健康行与失败原因用） */
+    resolution: DxcResolution | null;
+    /** 只有定位 + 探活都成功才非空 —— 跑编译只认这个 */
+    resolved: DxcResolved | null;
+    probe: DxcProbe | null;
+    version: string | null;
+    /** 状态标签（`ok` / `missing-configured` / `dll-missing` …），集成测试与门槛断言用 */
+    state: string;
+    notified: boolean;
+  } = { resolution: null, resolved: null, probe: null, version: null, state: 'not-probed', notified: false };
+  const typeProvider = new TypeDiagnosticsProvider(2);
+  let typeRuns = 0;
+  let lastTypeCounts: TypeCounts | null = null;
+
+  const notifyDxcUnavailable = (detail: string): void => {
+    if (dxcState.notified) return; // 一次性提示（规格异常表「客户端一次性明确提示」）
+    dxcState.notified = true;
+    connection.window.showInformationMessage(`Unity Shader 类型诊断不可用：${detail}`);
+  };
+
+  /** 定位 + 探活 dxc（启动时一次；`unityShader.dxcPath` 变化时重跑） */
+  const resolveDxcTool = async (): Promise<void> => {
+    const r = resolveDxc({ configuredPath: settings.dxcPath, moduleDir: __dirname });
+    dxcState.resolution = r;
+    if (!r.ok) {
+      dxcState.resolved = null;
+      dxcState.probe = null;
+      dxcState.version = null;
+      dxcState.state = r.reason;
+      log(`[type-diagnostics] dxc=missing reason=${r.reason} ${r.detail}`);
+      notifyDxcUnavailable(r.detail);
+      return;
+    }
+    const probe = await probeDxc(r.path);
+    dxcState.probe = probe;
+    dxcState.resolved = probe.ok ? r : null;
+    dxcState.version = probe.ok ? probe.version ?? null : null;
+    dxcState.state = probe.ok ? 'ok' : probe.reason;
+    log(dxcHealthLine(r, probe));
+    if (!probe.ok) notifyDxcUnavailable(probe.detail);
+  };
+
+  /** 跑一次类型诊断。触发面只有 `didOpen`/`didSave`/`didChangeWatchedFiles` 与命令 ——
+   *  **`didChange` 不触发**（DXC 无增量，规格范围 9）。`force` = 命令强制重算（绕缓存）。 */
+  const runTypeDiagnostics = async (file: string, force = false): Promise<void> => {
+    if (isGeneratedFile(file) || isCgSource(file)) return;
+    const state = store.get(file);
+    if (!state) return; // 只对已打开的文档跑（规格约束）
+    if (!settings.typeDiagnostics) {
+      typeDiags.delete(file);
+      typeProvider.clear(file);
+      publishMerged(file);
+      return;
+    }
+    if (force) typeProvider.clear(file);
+    const uri = openUris.get(file);
+    const version = uri ? documents.get(uri)?.version ?? 0 : 0;
+    // 语法 Error 互斥（规格范围 8）：只数 Error —— include 未找到的 Warning 不触发跳过。
+    // 开关开着时直接复用刚发布的语法诊断；**开关关掉时不能拿它当依据**（那时它是空的），
+    // 否则关掉语法诊断会让带语法错误的文档去跑 DXC，把刚被压掉的错误换个来源再推一遍。
+    let syntaxErrors = 0;
+    if (settings.syntaxDiagnostics) {
+      syntaxErrors = (syntaxDiags.get(file) ?? []).filter(
+        (d) => d.severity === DiagnosticSeverity.Error
+      ).length;
+    } else {
+      syntaxErrors = computeFileDiagnostics(treesForFile(file, state.text), {
+        file,
+        maxPerFile: settings.maxDiagnosticsPerFile,
+        exemptions: new ExemptionTable(),
+        includeCtx: includeCtx(),
+        syntaxDiagnostics: true,
+        includeDiagnostics: false,
+      }).counts.syntax;
+    }
+    const res = await typeProvider.run(file, state.text, {
+      version,
+      syntaxErrorCount: syntaxErrors,
+      dxc: dxcState.resolved,
+      dxcVersion: dxcState.version,
+      includeCtx: includeCtx(),
+      disabled: keywords.current.set,
+      tree: state.tree ?? undefined,
+      timeoutMs: settings.dxcTimeoutMs,
+      maxPerFile: settings.maxTypeDiagnosticsPerFile,
+      exemptions: new DxcExemptionTable(),
+    });
+    typeRuns++;
+    lastTypeCounts = res.counts;
+    typeDiags.set(file, res.diagnostics);
+    log(typeDiagnosticLogLine(file, res.counts));
+    publishMerged(file);
+  };
+
+  /** 开关关掉 → 清空所有已打开文档的类型诊断（规格异常表「已有类型诊断清空」） */
+  const clearAllTypeDiagnostics = (): void => {
+    typeProvider.clearAll();
+    for (const [file, diags] of [...typeDiags.entries()]) {
+      if (diags.length === 0) continue;
+      typeDiags.delete(file);
+      publishMerged(file);
+    }
+  };
+
   const notifyDegraded = (): void => {
     if (degradeNotified || env.degradedReasons.length === 0) return;
     degradeNotified = true;
@@ -404,6 +569,8 @@ export function start(): void {
       settings?: Partial<Settings>;
     };
     if (initOpts.settings) settings = { ...DEFAULT_SETTINGS, ...initOpts.settings };
+    // 嵌套对象不能靠浅合并（客户端只发部分键会把默认值整块替掉）
+    settings.formatting = normalizeFormatSwitches(initOpts.settings?.formatting ?? DEFAULT_SETTINGS.formatting);
     // 灰化通知只在客户端声明支持时发（规格范围 6：capabilities.experimental 协商）
     const exp = (params.capabilities?.experimental ?? {}) as Record<string, unknown>;
     clientWantsInactive = exp[INACTIVE_REGIONS_NOTIFICATION] === true;
@@ -429,6 +596,9 @@ export function start(): void {
         referencesProvider: true, // M3 引用查找（规格 feature-rename，T-029）
         renameProvider: { prepareProvider: true }, // M3 重命名两步流程（T-030）
         hoverProvider: true, // 悬停（规格 feature-hover，T-035）
+        // M5 格式化（规格 feature-formatting 范围 9）：门槛 FAIL 或用户关掉 → 不宣告该能力。
+        // 能力在 initialize 定死，改 `unityShader.formatting.enable` 需重载窗口（约束）
+        documentFormattingProvider: settings.formatting.enable,
         workspace: {
           fileOperations: {},
           // LSP 3.17 的静态 watched-files 能力在 workspace 下，类型定义未覆盖
@@ -447,18 +617,37 @@ export function start(): void {
     // 灰化：启动时读一次日志并起轮询（mtime 未变不重读，规格范围 8）
     refreshKeywords(true);
     startKeywordPolling();
+    // 类型诊断：定位并探活 dxc（失败 → 一次性提示 + `dxc=missing`，其余功能不受影响）
+    void resolveDxcTool();
   });
 
   connection.onDidChangeConfiguration((change) => {
     const next = (change.settings?.unityShader ?? {}) as Partial<Settings>;
+    const prevDxcPath = settings.dxcPath;
+    const prevType = settings.typeDiagnostics;
+    const prevFormatEnable = settings.formatting.enable;
     settings = { ...DEFAULT_SETTINGS, ...next };
+    settings.formatting = normalizeFormatSwitches(next.formatting ?? DEFAULT_SETTINGS.formatting);
     log(
       `settings updated: index=${settings.index} maxFile=${settings.maxIndexFileSize} ` +
         `syntax=${settings.syntaxDiagnostics} include=${settings.includeDiagnostics} ` +
-        `debounce=${settings.diagnosticsDebounceMs} maxDiag=${settings.maxDiagnosticsPerFile}`
+        `debounce=${settings.diagnosticsDebounceMs} maxDiag=${settings.maxDiagnosticsPerFile} ` +
+        `type=${settings.typeDiagnostics} dxcPath=${settings.dxcPath || 'auto'} ` +
+        `dxcTimeout=${settings.dxcTimeoutMs} maxTypeDiag=${settings.maxTypeDiagnosticsPerFile} ` +
+        `format=${settings.formatting.enable} maxFormatFile=${settings.maxFormatFileSize}`
     );
+    // 格式化能力在 initialize 定死：改开关只记提示，不假装即时生效（规格异常表）
+    if (settings.formatting.enable !== prevFormatEnable) {
+      log('format=capability-reload-required');
+    }
     // 开关变化立即重发：关掉语法诊断时旧诊断必须清空，不残留（规格异常表）
     for (const file of openUris.keys()) publishNow(file);
+    // 类型诊断开关关掉 → 清空已有类型诊断；`dxcPath` 改了 → 重新定位（规格范围 14）
+    if (!settings.typeDiagnostics || !prevType) clearAllTypeDiagnostics();
+    if (settings.dxcPath !== prevDxcPath) {
+      dxcState.notified = false;
+      void resolveDxcTool();
+    }
     // 灰化相关设置（轮询间隔 / 窗口 / 防抖）即时生效
     startKeywordPolling();
     refreshKeywords(true);
@@ -476,6 +665,7 @@ export function start(): void {
     publishNow(file); // didOpen 立即发布（规格范围 6）
     keywords.refresh(); // didOpen 读一次关键字（规格范围 8）
     pushInactive(file);
+    void runTypeDiagnostics(file); // didOpen 触发类型诊断（规格范围 9）
   });
 
   // TextDocuments 先 listen：它注册默认的 didChange 处理；
@@ -495,12 +685,16 @@ export function start(): void {
     if (!store.isGenerated(file)) {
       publishNow(file); // didSave 立即发布
       pushInactive(file); // 灰化同样立即重算
+      // 类型诊断在语法诊断之后跑：互斥判定要读刚算完的语法 Error（规格范围 8）
+      void runTypeDiagnostics(file);
     }
   });
 
   documents.onDidClose((e) => {
     const file = uriToFsPath(e.document.uri);
     clearDiagnostics(file, e.document.uri); // didClose 清空该文件诊断（规格范围 6）
+    typeProvider.clear(file); // 取消未完成的 DXC 子进程并丢掉缓存
+    typeDiags.delete(file);
     const bt = branchTimers.get(file);
     if (bt) {
       clearTimeout(bt);
@@ -517,6 +711,8 @@ export function start(): void {
       if (c.type === 3 /* Deleted */) {
         index.removeFile(file);
         clearDiagnostics(file);
+        typeProvider.clear(file);
+        typeDiags.delete(file);
         store.close(file);
         openUris.delete(file);
       } else {
@@ -526,8 +722,47 @@ export function start(): void {
           index.removeFile(file);
         }
         publishNow(file); // 外部修改（git 切分支等）驱动重算（规格异常表）
+        if (openUris.has(file)) void runTypeDiagnostics(file); // 类型诊断同样重算（规格范围 9）
       }
     }
+  });
+
+  // M5 格式化（T-063，规格 feature-formatting 范围 1）：整篇一次、返回**单个覆盖全文的 TextEdit**；
+  // 失败即不改（返回 null，编辑器零改动，范围 10）。
+  // 方法名是 `onDocumentFormatting`（不是 `onFormatting`）——写错时可选链会静默跳过注册，
+  // 表现为编辑器报 `Unhandled method textDocument/formatting`，所以这里不用可选链兜底。
+  connection.onDocumentFormatting((params) => {
+    const file = uriToFsPath(params.textDocument.uri);
+    formatRequests++;
+    const doc = documents.get(params.textDocument.uri);
+    const state = store.get(file);
+    const text = doc?.getText() ?? state?.text;
+    const empty = { verbatimBytes: 0, changedBytes: 0, verbatimLines: 0 };
+    if (text === undefined) {
+      log(formatHealthLine(file, { text: null, reason: 'no-document', ...empty }));
+      return null;
+    }
+    // 只有树与文本一致时才复用（ADR 0001 唯一 CST；不一致就重解析，别拿旧树排版）
+    const trees =
+      state && state.tree && state.text === text
+        ? isHlslSource(file)
+          ? { hlsl: state.tree }
+          : { shaderlab: state.tree }
+        : undefined;
+    const out = formatDocument({
+      file,
+      text,
+      indent: resolveIndentOptions(params.options),
+      switches: settings.formatting,
+      maxBytes: settings.maxFormatFileSize,
+      trees,
+    });
+    log(formatHealthLine(file, out));
+    if (out.text === null || out.text === text) return null;
+    formatVerbatimBytes += out.verbatimBytes;
+    formatChangedBytes += out.changedBytes;
+    const lines = text.split('\n').length;
+    return [TextEdit.replace(Range.create(Position.create(0, 0), Position.create(lines, 0)), out.text)];
   });
 
   // M2 转到定义（T-014～T-017）：生成文件不响应；索引进行中立即返回当前结果
@@ -680,6 +915,20 @@ export function start(): void {
         health: lastHealthLine,
       };
     }
+    if (params.command === 'unityshader/runTypeDiagnostics') {
+      // 客户端命令 unityshader.runTypeDiagnostics 的实现：对当前文档**强制重算**（绕缓存，规格范围 9）。
+      // 可选参数 { uri } 只给集成测试用；缺省取活动文档。
+      const args = (params.arguments ?? []) as { uri?: string }[];
+      const file = args[0]?.uri ? uriToFsPath(args[0].uri) : [...openUris.keys()][0];
+      if (!file) return { error: 'no-open-document' };
+      await runTypeDiagnostics(file, true);
+      return {
+        file,
+        counts: lastTypeCounts,
+        dxc: dxcHealthLine(dxcState.resolution, dxcState.probe),
+        state: dxcState.state,
+      };
+    }
     if (params.command === 'unityshader/__indexStats') {
       return {
         pid: process.pid, // 集成测试据此断言进程身份与重启
@@ -703,6 +952,30 @@ export function start(): void {
           regions: lastRegionTotal,
           pollMs: settings.keywordPollMs,
           health: lastHealthLine,
+        },
+        // M5 类型诊断：集成测试据此断言 dxc 状态、开关与计数
+        typeDiagnostics: {
+          enabled: settings.typeDiagnostics,
+          runs: typeRuns,
+          cachedFiles: typeProvider.cachedFiles,
+          dxc: dxcHealthLine(dxcState.resolution, dxcState.probe),
+          dxcState: dxcState.state,
+          notified: dxcState.notified,
+          settings: {
+            timeoutMs: settings.dxcTimeoutMs,
+            maxPerFile: settings.maxTypeDiagnosticsPerFile,
+            dxcPath: settings.dxcPath,
+          },
+          lastCounts: lastTypeCounts,
+        },
+        // M5 格式化：集成测试据此断言能力宣告与请求计数
+        formatting: {
+          enabled: settings.formatting.enable,
+          requests: formatRequests,
+          verbatimBytes: formatVerbatimBytes,
+          changedBytes: formatChangedBytes,
+          switches: settings.formatting,
+          maxBytes: settings.maxFormatFileSize,
         },
       };
     }

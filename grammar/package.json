@@ -8,7 +8,8 @@
     "generate": "tree-sitter generate",
     "compile": "node-gyp rebuild",
     "test": "tree-sitter test",
-    "parse": "tree-sitter parse"
+    "parse": "tree-sitter parse",
+    "prebuild": "prebuildify --napi --strip"
   },
   "tree-sitter": [
     {
@@ -21,6 +22,7 @@
   ],
   "devDependencies": {
     "node-gyp": "^13.0.0",
+    "prebuildify": "^6.0.1",
     "tree-sitter-cli": "^0.25.0"
   },
   "dependencies": {

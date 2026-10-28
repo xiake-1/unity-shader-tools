@@ -124,7 +124,9 @@ async function main() {
         UNITYSHADER_TEST_WORKSPACE: ws,
         UNITYSHADER_TEST_FILE: shaderPath,
         UNITYSHADER_KEYWORD_LOG: keywordLog,
-        UNITYSHADER_SERVER_LOG: path.join(ws, 'server-boot.log'),
+        UNITYSHADER_SERVER_LOG: process.env.DSH_SERVER_LOG || path.join(ws, 'server-boot.log'),
+        // 格式化「失败即不改」注入点：标志文件存在时打印器抛错（用例自己创建/删除）
+        UNITYSHADER_FORMAT_FAIL_FILE: path.join(ws, 'format-fail.flag'),
         UNITYSHADER_CLIENT_LOG: path.join(ws, 'client-state.log'),
       },
       launchArgs: [ws, '--disable-workspace-trust'],
