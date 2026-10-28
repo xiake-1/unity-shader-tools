@@ -101,15 +101,16 @@ function messageOf(node: SyntaxNode): string {
   return node.isMissing ? `MISSING ${node.type}` : `syntax error - ${describeError(node)}`;
 }
 
-/** `#include` 的路径节点（Range 要落在路径字符串上，规格范围 3） */
-function includePathNode(node: SyntaxNode): SyntaxNode | null {
+/** `#include` 的路径节点（Range 要落在路径字符串上，规格范围 3）。
+ *  T-053 起也供类型诊断的 include 改写用 —— **同一份口径**（规格约束：不造第二套 include 解析）。 */
+export function includePathNode(node: SyntaxNode): SyntaxNode | null {
   for (const c of node.children) {
     if (c.type === 'system_lib_string' || c.type === 'string_literal' || c.type === 'string') return c;
   }
   return null;
 }
 
-function collectIncludeNodes(root: SyntaxNode): SyntaxNode[] {
+export function collectIncludeNodes(root: SyntaxNode): SyntaxNode[] {
   const out: SyntaxNode[] = [];
   const visit = (n: SyntaxNode): void => {
     if (n.type === 'preproc_include') out.push(n);
@@ -120,7 +121,7 @@ function collectIncludeNodes(root: SyntaxNode): SyntaxNode[] {
 }
 
 /** 从 `#include` 节点取原始 spec 文本（去掉引号/尖括号） */
-function includeSpecOf(includeNode: SyntaxNode): string {
+export function includeSpecOf(includeNode: SyntaxNode): string {
   const pathNode = includePathNode(includeNode);
   const raw = pathNode ? pathNode.text : '';
   return raw.replace(/^["<]|[">]$/g, '').trim();

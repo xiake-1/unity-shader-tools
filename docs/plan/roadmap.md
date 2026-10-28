@@ -5,7 +5,7 @@ updated: 2026-10-28
 # 路线图
 
 里程碑划分依据 [../分析/10-feature-feasibility.md](../分析/10-feature-feasibility.md) 的"价值/成本"排序，
-范围来自 [../project.md](../project.md) 范围节。全部里程碑尚未启动。
+范围来自 [../project.md](../project.md) 范围节。当前状态：M1～M5 已 done，M6 planned。
 
 ## M1 地基：工程骨架 + LSP 通道 + 解析层（done）
 
@@ -54,12 +54,25 @@ updated: 2026-10-28
         实测 166 文件语法诊断总数 = 0 → 默认开启）
   - [x] 读取 Unity `Editor.log` 的 `Disabled keywords:` 列表，把未激活 `#if` 分支置灰；日志缺失时降级为不灰化且不报错
 
-## M5 类型诊断（DXC）与格式化（planned）
+## M5 类型诊断（DXC）与格式化（done：T-049～T-067，2026-10-28）
 
+- 范围补充：功能规格 [../specs/feature-type-diagnostics.md](../specs/feature-type-diagnostics.md) 与
+  [../specs/feature-formatting.md](../specs/feature-formatting.md) 已确认（类型诊断六个范围点、格式化四个范围点
+  经用户 2026-10-28 逐项确认），拆为 T-049～T-065；发布流水线（ADR 0005 落地 + ADR 0010 的第二个原生件）拆为 T-066～T-067。
+  细粒度验收以规格为准，本节只保留阶段级标准。
+  **T-049 是类型诊断的前置**（`dxc` 产物与定位不可用时，门槛测试与诊断接线都跑不起来，ADR 0010）；
+  格式化侧不依赖 DXC，可与类型诊断并行；T-066/T-067 属发布面，不阻塞前两组。
 - 验收标准：
   - [ ] 注入类型错误（`float4 = float3`、非法 swizzle）出诊断，且位置正确回映射到 `.shader` 的行列
-  - [ ] DXC 诊断在官方语料上的误报低于设定阈值，达标前默认关闭或降级为 Hint
+        （测法已定：**分块虚拟文档与原文等长 → 坐标恒等**，DXC 的 `(line,col)` 就是 `.shader` 坐标，
+        不需要自建双向映射表；见规格范围 1/2，T-050/T-058）
+  - [ ] DXC 诊断在官方语料（80+ 包内 `.hlsl` + 56 内置 include + 50 工程 shader）上**零误报**，达不到则默认关闭
+        （测法已定：`npm run gate:type-diagnostics` 断言类型诊断总数 = 0 并打印**逐错误签名**聚合表
+        （归一化消息 + 可选 `-W` flag；实测 DXC 语义错误无错误码），语料缺失或 dxc 不可用记 SKIP 而非 PASS；
+        默认值随门槛，见规格范围 12/13。误报控制 = 按消息模式的豁免表 + 「编译失败即整块不产」，ADR 0009 机制同构）
   - [ ] 格式化分层（ShaderLab 外壳 / `HLSLPROGRAM` 内部），两次格式化幂等，官方语料 diff 仅空白变化
+        （测法已定：`npm run gate:format` 断言幂等 + 去 trivia 的叶子 token 序列不变 + 逐行 strip 空白后与原文相同；
+        **未达标 → 不注册 formatting provider**，见规格范围 8/9，ADR 0011）
 
 ## M6 Unity 包侧（planned）
 

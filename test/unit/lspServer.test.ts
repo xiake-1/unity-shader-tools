@@ -149,6 +149,77 @@ describe('LSP 生命周期（真实 stdio）', () => {
     expect(initResult?.capabilities?.textDocumentSync).toBe(2); // Incremental
   });
 
+  it('T-063 门槛联动：默认宣告 `documentFormattingProvider`；`formatting.enable=false` → 不宣告', async () => {
+    // 默认值来自 `contributes.configurationDefaults`，而它由 `npm run gate:format` 的结果决定
+    expect((initResult?.capabilities as { documentFormattingProvider?: boolean })?.documentFormattingProvider).toBe(true);
+    const p2 = spawn(process.execPath, [SERVER], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const c2 = new Client(p2);
+    try {
+      const r2 = (await c2.request('initialize', {
+        processId: process.pid,
+        rootUri: null,
+        workspaceFolders: [],
+        capabilities: {},
+        initializationOptions: { settings: { index: false, formatting: { enable: false } } },
+      })) as { capabilities: { documentFormattingProvider?: boolean } };
+      expect(r2.capabilities.documentFormattingProvider).toBe(false);
+      await c2.request('shutdown', null, 5000);
+      c2.notify('exit', {});
+    } finally {
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(() => {
+          p2.kill();
+          resolve();
+        }, 3000);
+        p2.on('exit', () => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    }
+  });
+
+  it('T-063 协议层：`textDocument/formatting` 返回**单个覆盖全文的 TextEdit**（规格范围 1）', async () => {
+    // 编辑器会把整篇编辑拆成逐行编辑，所以「单个 TextEdit」只能在协议层断言
+    const messy = path.join(tmp, 'messy.shader');
+    const text = [
+      'Shader "Fmt/Messy"',
+      '{',
+      '\tProperties',
+      '   {',
+      '_A("A", 2D) = "white" {}',
+      '   }',
+      'SubShader { Pass { } }',
+      '}',
+      '',
+    ].join('\n');
+    fs.writeFileSync(messy, text, 'utf8');
+    const uri = `file:///${messy.replace(/\\/g, '/')}`;
+    client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'unityshader', version: 1, text } });
+    const edits = (await client.request('textDocument/formatting', {
+      textDocument: { uri },
+      options: { tabSize: 4, insertSpaces: true },
+    })) as { range: { start: { line: number }; end: { line: number } }; newText: string }[] | null;
+    expect(Array.isArray(edits)).toBe(true);
+    expect(edits!.length).toBe(1);
+    const e = edits![0];
+    expect(e.range.start.line).toBe(0);
+    expect(e.range.end.line).toBeGreaterThanOrEqual(text.split('\n').length - 1);
+    const lines = e.newText.split('\n');
+    expect(lines[2]).toBe('    Properties');
+    expect(lines[4]).toBe('        _A("A", 2D) = "white" {}');
+    // 幂等：把结果再排一次，应返回 null（无改动）。
+    // 这里用 didClose + didOpen 而不是 didChange：夹具发的是无 range 的整篇替换，
+    // 增量同步下 TextDocuments 不认（真实编辑器发的是带 range 的增量）
+    client.notify('textDocument/didClose', { textDocument: { uri } });
+    client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'unityshader', version: 1, text: e.newText } });
+    const again = (await client.request('textDocument/formatting', {
+      textDocument: { uri },
+      options: { tabSize: 4, insertSpaces: true },
+    })) as { newText: string }[] | null;
+    expect(again).toBeNull();
+  });
+
   it('didOpen 后索引到符号，executeCommand 可查统计', async () => {
     client.notify('textDocument/didOpen', {
       textDocument: { uri: `file:///${shaderFile.replace(/\\/g, '/')}`, languageId: 'unityshader', version: 1, text: fs.readFileSync(shaderFile, 'utf8') },

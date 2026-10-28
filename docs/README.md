@@ -11,6 +11,7 @@ updated: 2026-10-28
 | ① 概览 | [project.md](project.md) | 目标、范围、技术栈、设计原则 |
 | ② 计划 | [plan/roadmap.md](plan/roadmap.md) | 阶段、里程碑、验收标准 |
 |    | [plan/backlog.md](plan/backlog.md) | 未完成任务唯一权威 |
+|    | [plan/sprint-05.md](plan/sprint-05.md) | 已完成迭代（M5 类型诊断 DXC + 格式化 + 发布流水线） |
 |    | [plan/sprint-04.md](plan/sprint-04.md) | 已完成迭代（M4 语法诊断与死分支灰化） |
 |    | [plan/sprint-03.md](plan/sprint-03.md) | 已完成迭代（M3 补全与引用） |
 |    | [plan/sprint-02.md](plan/sprint-02.md) | 已完成迭代（M2 转到定义） |
@@ -32,6 +33,8 @@ updated: 2026-10-28
 | [specs/feature-rename.md](specs/feature-rename.md) | `server/src/`（references + rename + 联动改名）、`client/src/`（能力声明） | active |
 | [specs/feature-syntax-diagnostics.md](specs/feature-syntax-diagnostics.md) | `server/src/`（diagnostics + errorExemption）、`client/src/`（配置项） | active |
 | [specs/feature-dead-branch-dimming.md](specs/feature-dead-branch-dimming.md) | `server/src/`（unityKeywordSource + preprocessorEval + inactiveRegions）、`client/src/`（装饰 + 命令） | active |
+| [specs/feature-type-diagnostics.md](specs/feature-type-diagnostics.md) | `server/src/`（typeDiagnostics + dxcRunner + dxcMacroTable + dxcExemption）、`client/src/`（配置项） | active |
+| [specs/feature-formatting.md](specs/feature-formatting.md) | `server/src/`（formatter + hlslPrinter + formatSettings）、`client/package.json`（配置项与门槛联动） | active |
 
 ## ADR 清单
 
@@ -46,8 +49,12 @@ updated: 2026-10-28
 | [0007-fork-tree-sitter-hlsl-workspace.md](decisions/0007-fork-tree-sitter-hlsl-workspace.md) | fork tree-sitter-hlsl 为 workspace 包 `hlsl/`，struct 裸宏成员与跨行宏块注释补丁本地维护 | — |
 | [0008-dead-branch-dimming-editor-log.md](decisions/0008-dead-branch-dimming-editor-log.md) | 死分支灰化：关键字取 Unity `Editor.log` 的 `Disabled keywords:`，求值在 server、呈现走 LSP 扩展通知 + 客户端装饰 | — |
 | [0009-syntax-diagnostics-error-exemption.md](decisions/0009-syntax-diagnostics-error-exemption.md) | 语法诊断误报控制：grammar 继续修 + ERROR 模式豁免表 + 官方语料零误报门槛测试 | — |
+| [0010-dxc-subprocess-bundled-distribution.md](decisions/0010-dxc-subprocess-bundled-distribution.md) | DXC 执行形态与分发：短命子进程调随扩展附带的官方预编译 `dxc`（库编译目标）；宏用自写默认宏表，`Editor.log` Disabled 只做减法 | — |
+| [0011-self-written-cst-formatter.md](decisions/0011-self-written-cst-formatter.md) | 格式化引擎：全自写 CST 打印器，不引入第二解析器/外部格式化依赖；未识别结构与 `ERROR` 区域字节级原样输出 | — |
+| [0012-legacy-adr-link-repair-exemption.md](decisions/0012-legacy-adr-link-repair-exemption.md) | 旧 ADR 不可变性的窄豁免：只允许机械修复相对链接的目标路径，其余内容仍永不修改 | — |
+| [0013-formatting-perf-budget-by-shape.md](decisions/0013-formatting-perf-budget-by-shape.md) | 格式化性能预算按文档形状分两档（ShaderLab 为主 P95<150 ms、HLSL 区域为主 P95<250 ms）：双遍复验是硬断言 ①② 的必要代价 | — |
 
-（无取代关系。ADR 0005 结清 0001 留下的「native/WASM + 打包工具」未决项；ADR 0006 把 log 22:00 的语言 id 拆分登记为决策；ADR 0007 调整 0001 中「现成 tree-sitter-hlsl」的含义（现为本地 fork workspace 包），并要求 0005 的 prebuild 从 fork 出产物。ADR 0008 界定 0002 的「不造私有协议」＝不脱离 LSP 通道（`$/…` 扩展通知允许），并把「M6 桥是否取代 Editor.log 作关键字源」登记为未决项；ADR 0009 承接 0004 与 0007 的后果，只补「误报怎么控」。**更正（2026-10-28）**：ADR 0007 后果段写的「`parser.c`（约 20 MB）随仓库提交」与仓库实际不符——`.gitignore` 忽略 `grammar/src/parser.c` 与 `hlsl/src/parser.c`，两者均为生成物、由 `npm run grammar:generate` / `hlsl:generate` 重建（做法见 `hlsl/README.md`「重新生成 / 编译」）；MSVC 链接中间产物（`*.obj`/`*.lib`/`*.exp`）同样不入库。按规范 §3 旧 ADR 不改写，以本条为准。将来若支持 vscode.dev，需 WASM + 非 stdio 宿主，届时另立 ADR 取代 0005 与 0002 的相关部分。）
+（无取代关系。ADR 0005 结清 0001 留下的「native/WASM + 打包工具」未决项；ADR 0006 把 log 22:00 的语言 id 拆分登记为决策；ADR 0007 调整 0001 中「现成 tree-sitter-hlsl」的含义（现为本地 fork workspace 包），并要求 0005 的 prebuild 从 fork 出产物。ADR 0008 界定 0002 的「不造私有协议」＝不脱离 LSP 通道（`$/…` 扩展通知允许），并把「M6 桥是否取代 Editor.log 作关键字源」登记为未决项；ADR 0009 承接 0004 与 0007 的后果，只补「误报怎么控」。**更正（2026-10-28）**：ADR 0007 后果段写的「`parser.c`（约 20 MB）随仓库提交」与仓库实际不符——`.gitignore` 忽略 `grammar/src/parser.c` 与 `hlsl/src/parser.c`，两者均为生成物、由 `npm run grammar:generate` / `hlsl:generate` 重建（做法见 `hlsl/README.md`「重新生成 / 编译」）；MSVC 链接中间产物（`*.obj`/`*.lib`/`*.exp`）同样不入库。按规范 §3 旧 ADR 不改写，以本条为准。将来若支持 vscode.dev，需 WASM + 非 stdio 宿主，届时另立 ADR 取代 0005 与 0002 的相关部分。ADR 0010 结清 0004 留下的 DXC 执行面与分发面（并**更正 0004 的「自带 dxc 仅几 MB」体积口径**：官方发布包 Windows zip 25.8 MB、Linux tar.gz 12.4 MB，且无 macOS 预编译产物），同时把「短命工具子进程」界定在 core 规格「不起额外进程」禁令之外（不取代 0002）；ADR 0011 定格式化引擎为全自写 CST 打印器，是 0001 唯一 CST 原则在格式化上的应用。两条都不取代任何旧 ADR。ADR 0012 给规范 §3「旧 ADR 永不修改」开一个窄豁免：只允许机械修复相对链接的**目标路径**（链接文字与目标原本相同时同步修正），正文与 frontmatter 一律不动、改动逐条登记 log；起因是 0001–0005 的 15 条坏链（分布在 12 行：`../../分析/…` 与 `../../specs/…`；`docs/` 下才有 `分析/`、`specs/`，仓库根没有）。不取代任何旧 ADR。ADR 0013 细化 ADR 0011 留下的性能口径：三条硬断言要求整条流水线跑两遍，故格式化预算按文档形状分两档，并禁止以性能为名移除复验。不取代任何旧 ADR。）
 
 ## 分析文档（`分析/`，只读证据，不参与状态流转）
 

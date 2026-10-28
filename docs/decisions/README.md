@@ -9,3 +9,6 @@ ADR 目录：4 位编号命名 `NNNN-标题.md`，只追加，旧文件永不修
 - [0007-fork-tree-sitter-hlsl-workspace.md](0007-fork-tree-sitter-hlsl-workspace.md) — fork tree-sitter-hlsl 为 workspace 包，grammar 补丁本地维护
 - [0008-dead-branch-dimming-editor-log.md](0008-dead-branch-dimming-editor-log.md) — 死分支灰化：关键字源＝Unity Editor.log，呈现＝LSP 扩展通知 + 客户端装饰
 - [0009-syntax-diagnostics-error-exemption.md](0009-syntax-diagnostics-error-exemption.md) — 语法诊断误报控制：grammar 修 + ERROR 模式豁免表 + 语料零误报门槛
+- [0010-dxc-subprocess-bundled-distribution.md](0010-dxc-subprocess-bundled-distribution.md) — DXC 执行形态与分发：短命子进程 + 随扩展附带官方预编译 dxc；宏用自写默认宏表
+- [0011-self-written-cst-formatter.md](0011-self-written-cst-formatter.md) — 格式化引擎：全自写 CST 打印器，未识别结构与 ERROR 区字节级原样输出
+- [0012-legacy-adr-link-repair-exemption.md](0012-legacy-adr-link-repair-exemption.md) — 旧 ADR 不可变性的窄豁免：只允许机械修复相对链接目标路径

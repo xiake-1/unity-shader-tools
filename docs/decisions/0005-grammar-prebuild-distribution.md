@@ -19,7 +19,7 @@ title: grammar 分发采用随 VSIX 附带的 N-API prebuilds（不在安装期�
 - server 由 VS Code 的 Electron 二进制以 `ELECTRON_RUN_AS_NODE=1` 拉起（ADR 0002、log 21:24）。N-API 在 Node 与 Electron 里 ABI 通用，已被实测：`npm run test:vscode` 6/6 在 Electron-as-node 宿主里加载原生绑定通过。
 - **VSIX 安装不执行 `npm install`**（扩展包自带依赖），所以「安装期编译」在 VSIX 这条路径上根本不成立。
 - 性能门槛由 native 达成：真实工程冷索引 1402ms（<3s）、增量 p95 4.05ms、RSS 192MB（log 22:52、20:38）。
-- 对照与风险登记：对标产品三平台原生二进制全塞 VSIX → 78MB（[../../分析/01-architecture.md](../../分析/01-architecture.md)），[../../分析/06-feasibility-and-roadmap.md](../../分析/06-feasibility-and-roadmap.md) §4 给的缓解是「`targetPlatform` 分包 / 首次运行下载 / WASM 单文件」。
+- 对照与风险登记：对标产品三平台原生二进制全塞 VSIX → 78MB（[../分析/01-architecture.md](../分析/01-architecture.md)），[../分析/06-feasibility-and-roadmap.md](../分析/06-feasibility-and-roadmap.md) §4 给的缓解是「`targetPlatform` 分包 / 首次运行下载 / WASM 单文件」。
 
 备选：
 

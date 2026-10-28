@@ -7,3 +7,5 @@
 - [feature-hover.md](feature-hover.md) — 悬停（M3 后补）：符号声明行 + 邻近注释/宏文档、自写语义表（`SV_*` 等系统值语义）
 - [feature-syntax-diagnostics.md](feature-syntax-diagnostics.md) — 语法诊断（M4）：tree-sitter ERROR/MISSING → Error、include 未找到 → Warning、ERROR 模式豁免表、语料零误报门槛
 - [feature-dead-branch-dimming.md](feature-dead-branch-dimming.md) — `#if` 死分支灰化（M4）：Editor.log `Disabled keywords:`、三态求值、LSP 扩展通知 + 客户端装饰
+- [feature-type-diagnostics.md](feature-type-diagnostics.md) — 类型诊断（M5）：分块编译 + 坐标恒等、短命子进程调 DXC、内置默认宏表、DXC 错误码豁免表、零误报门槛
+- [feature-formatting.md](feature-formatting.md) — 代码格式化（M5）：全自写 CST 打印器分层、未识别与 ERROR 区原样输出、幂等 + token 不变门槛

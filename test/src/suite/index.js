@@ -8,6 +8,8 @@ async function run() {
     require('./completion.test.js'),
     require('./rename.test.js'),
     require('./diagnostics.test.js'),
+    require('./typeDiagnostics.test.js'),
+    require('./formatting.test.js'),
     require('./deadBranch.test.js'),
     require('./extension.test.js'),
   ];
