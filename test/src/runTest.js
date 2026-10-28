@@ -106,6 +106,15 @@ async function main() {
     'utf8'
   );
 
+  // T-048 灰化：自包含 fixture 日志（规格验收要求「Editor.log 用合成日志文件」，
+  // 真实 Editor.log 只作补充样本）。server 侧用 UNITYSHADER_KEYWORD_LOG 注入路径。
+  const keywordLog = path.join(ws, 'fixture-Editor.log');
+  fs.writeFileSync(
+    keywordLog,
+    'Unity Editor 2022.3.62f3c1 (fixture)\nCompiling shader variants\nDisabled keywords: UNITYSHADER_TEST_DEAD ANOTHER_DEAD\nDone.\n',
+    'utf8'
+  );
+
   try {
     await runTests({
       extensionDevelopmentPath,
@@ -114,6 +123,7 @@ async function main() {
       extensionTestsEnv: {
         UNITYSHADER_TEST_WORKSPACE: ws,
         UNITYSHADER_TEST_FILE: shaderPath,
+        UNITYSHADER_KEYWORD_LOG: keywordLog,
         UNITYSHADER_SERVER_LOG: path.join(ws, 'server-boot.log'),
         UNITYSHADER_CLIENT_LOG: path.join(ws, 'client-state.log'),
       },

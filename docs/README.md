@@ -11,7 +11,8 @@ updated: 2026-10-28
 | ① 概览 | [project.md](project.md) | 目标、范围、技术栈、设计原则 |
 | ② 计划 | [plan/roadmap.md](plan/roadmap.md) | 阶段、里程碑、验收标准 |
 |    | [plan/backlog.md](plan/backlog.md) | 未完成任务唯一权威 |
-|    | [plan/sprint-03.md](plan/sprint-03.md) | 当前迭代（M3 补全与引用） |
+|    | [plan/sprint-04.md](plan/sprint-04.md) | 已完成迭代（M4 语法诊断与死分支灰化） |
+|    | [plan/sprint-03.md](plan/sprint-03.md) | 已完成迭代（M3 补全与引用） |
 |    | [plan/sprint-02.md](plan/sprint-02.md) | 已完成迭代（M2 转到定义） |
 |    | [plan/sprint-01.md](plan/sprint-01.md) | 已完成迭代（M1 地基） |
 | ③ 规格 | [specs/](specs/) | 功能规格（见目录内列表） |

@@ -25,7 +25,9 @@
       },
       "[hlsl]": {
         "editor.wordBasedSuggestions": "off"
-      }
+      },
+      "unityShader.syntaxDiagnostics": true,
+      "unityShader.includeDiagnostics": true
     },
     "languages": [
       {
@@ -67,6 +69,10 @@
       {
         "command": "unityshader.showIndexStats",
         "title": "Unity Shader: Show Index Stats"
+      },
+      {
+        "command": "unityshader.refreshShaderKeywords",
+        "title": "Unity Shader: Refresh Unity Keywords"
       }
     ],
     "configuration": {
@@ -92,6 +98,48 @@
           "type": "string",
           "default": "",
           "description": "Unity Editor 安装目录（含 Data/CGIncludes）；留空则自动发现"
+        },
+        "unityShader.syntaxDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "语法诊断（tree-sitter ERROR/MISSING → 红波浪线）。默认值与 `npm run gate:diagnostics` 门槛联动：门槛 PASS 才为 true"
+        },
+        "unityShader.includeDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "「include 未找到」Warning（降级态自动不产）"
+        },
+        "unityShader.diagnosticsDebounceMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "编辑中间态的发布防抖（毫秒）；0 = 每次编辑即时发布"
+        },
+        "unityShader.maxDiagnosticsPerFile": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "单文件诊断条数上限，超出按文档顺序截断并记日志"
+        },
+        "unityShader.keywordPollMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 0,
+          "description": "Unity `Editor.log` 的 mtime 轮询间隔（毫秒）；0 = 关闭轮询（只用打开文档与命令刷新）"
+        },
+        "unityShader.keywordLogScanBytes": {
+          "type": "number",
+          "default": 524288,
+          "minimum": 1024,
+          "description": "读 `Editor.log` 的尾部窗口（字节）；命中行在窗口外视为未命中"
+        },
+        "unityShader.branchDebounceMs": {
+          "type": "number",
+          "default": 700,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "死分支求值与推送的防抖（毫秒），独立于语法诊断"
         }
       }
     }

@@ -41,12 +41,18 @@ updated: 2026-10-28
   - [x] 已知 Unity 宏（`SAMPLE_TEXTURE2D`、`TEXTURE2D`、`TransformWorldToHClip` 等）可补全并带文档（T-023 `preproc_function_def` 入索引 + T-026 文档三级回退，log 08:53 / 09:11）
   - [x] Rename 回归语料（含注释、字符串、未激活 `#if` 分支、同名不同作用域字段）零误改（T-032 逐处 Range 断言 + T-030 作用域/分支用例，log 09:52）
 
-## M4 语法诊断与死分支灰化（planned）
+## M4 语法诊断与死分支灰化（done）
 
+- 范围补充：功能规格 [../specs/feature-syntax-diagnostics.md](../specs/feature-syntax-diagnostics.md) 与
+  [../specs/feature-dead-branch-dimming.md](../specs/feature-dead-branch-dimming.md) 已确认（七个范围点经用户 2026-10-28 逐项确认），
+  拆为 T-037～T-048；细粒度验收以规格为准，本节只保留阶段级标准。
+  **T-034 是语法诊断的前置**（豁免表与零误报门槛共用其 ERROR 模式聚合口径，ADR 0009）；灰化侧无此前置。
 - 验收标准：
-  - [ ] 括号不匹配、缺 `;`、`HLSLPROGRAM` 缺 `ENDHLSL` 出红波浪线
-  - [ ] 官方语料（80+ 包内 `.hlsl` + 56 内置 include + 50 工程 shader）**零误报**，达不到则不默认开启
-  - [ ] 读取 Unity `Editor.log` 的 `Disabled keywords:` 列表，把未激活 `#if` 分支置灰；日志缺失时降级为不灰化且不报错
+  - [x] 括号不匹配、缺 `;`、`HLSLPROGRAM` 缺 `ENDHLSL` 出红波浪线
+  - [x] 官方语料（80+ 包内 `.hlsl` + 56 内置 include + 50 工程 shader）**零误报**，达不到则不默认开启
+        （测法已定：`npm run gate:diagnostics` 断言语法诊断总数 = 0 并打印逐模式 ERROR 聚合表，见规格 §范围 8。
+        实测 166 文件语法诊断总数 = 0 → 默认开启）
+  - [x] 读取 Unity `Editor.log` 的 `Disabled keywords:` 列表，把未激活 `#if` 分支置灰；日志缺失时降级为不灰化且不报错
 
 ## M5 类型诊断（DXC）与格式化（planned）
 

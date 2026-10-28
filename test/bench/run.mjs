@@ -8,6 +8,7 @@
  * 用法：npm run bench
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SymbolIndex } from '../../server/out/symbolIndex.js';
@@ -18,6 +19,10 @@ import { provideHover } from '../../server/out/hover.js';
 import { provideReferences } from '../../server/out/references.js';
 import { rename as provideRename } from '../../server/out/rename.js';
 import { collectOccurrences } from '../../server/out/occurrences.js';
+import { computeFileDiagnostics, treesForFile } from '../../server/out/diagnostics.js';
+import { parseHlslFile } from '../../server/out/parser.js';
+import { collectInactiveRegions } from '../../server/out/inactiveRegions.js';
+import { UnityKeywordSource } from '../../server/out/unityKeywordSource.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
@@ -312,6 +317,83 @@ if (rnName) {
   rnMedian = rnSamples[1];
 }
 
+// ---- 6) M4 语法诊断（T-042：2000 行 shader 单文件 P95 < 150ms，与 hover/completion 同预算）----
+// 口径与 server 的 publishNow 一致：treesForFile + computeFileDiagnostics 全算（含解析），
+// 因为发布路径就是从这里取树。
+const diagFile = path.join(PROJECT, 'Assets', '__bench_diagnostics.shader'); // 内存文档，不落盘
+const diagText = [
+  'Shader "Bench/Diagnostics"',
+  '{',
+  '  Properties { _MainTex("Tex", 2D) = "white" {} }',
+  '  SubShader',
+  '  {',
+  '    Pass',
+  '    {',
+  '      HLSLPROGRAM',
+  '      #include "UnityCG.cginc"',
+  '      struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };',
+  '      struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };',
+  ...Array.from({ length: 1985 }, (_, i) => `      float b${i} = ${i} * 2.0 + ${i};`),
+  '      ENDHLSL',
+  '    }',
+  '  }',
+  '}',
+  '',
+].join('\n');
+store.open(diagFile, diagText);
+const diagTrees = treesForFile(diagFile, diagText);
+computeFileDiagnostics(diagTrees, { file: diagFile }); // 预热
+const diagSamples = [];
+let diagCount = 0;
+for (let k = 0; k < 20; k++) {
+  const t = performance.now();
+  const r = computeFileDiagnostics(treesForFile(diagFile, diagText), { file: diagFile });
+  diagSamples.push(performance.now() - t);
+  diagCount = r.diagnostics.length;
+}
+diagSamples.sort((a, b) => a - b);
+const diagMedian = diagSamples[Math.floor(diagSamples.length / 2)];
+const diagP95 = diagSamples[Math.floor(diagSamples.length * 0.95) - 1] ?? diagSamples[diagSamples.length - 1];
+const diagLines = diagText.split('\n').length;
+
+// ---- 7) M4 死分支求值（T-048：2000 行 shader 采样 20 次 P95 < 150ms）----
+// 口径 = 规格约束里的「求值 + 推送」的求值部分（推送只是一次 notification send，可忽略）。
+const deadText = [
+  ...Array.from(
+    { length: 40 },
+    (_, i) =>
+      `#if DEAD_MACRO_${i}\nfloat4 dead${i}(){ return ${i}; }\n#elif UNKNOWN_${i}\nfloat4 maybe${i}(){ return 0; }\n#else\nfloat4 live${i}(){ return 1; }\n#endif`
+  ),
+  ...Array.from({ length: 1799 }, (_, i) => `float b${i} = ${i} * 1.5;`),
+  '',
+].join('\n');
+const deadTree = parseHlslFile(deadText);
+const deadDisabled = new Set(Array.from({ length: 40 }, (_, i) => `DEAD_MACRO_${i}`));
+collectInactiveRegions(deadTree.rootNode, deadText, { disabled: deadDisabled }); // 预热
+const deadSamples = [];
+let deadRegionCount = 0;
+for (let k = 0; k < 20; k++) {
+  const t = performance.now();
+  deadRegionCount = collectInactiveRegions(deadTree.rootNode, deadText, { disabled: deadDisabled }).length;
+  deadSamples.push(performance.now() - t);
+}
+deadSamples.sort((a, b) => a - b);
+const deadMedian = deadSamples[Math.floor(deadSamples.length / 2)];
+const deadP95 = deadSamples[Math.floor(deadSamples.length * 0.95) - 1] ?? deadSamples[deadSamples.length - 1];
+
+// ---- 8) 关键字轮询空转（T-048：mtime 未变不得产生可测 CPU 峰值）----
+// 60 s 墙钟在 CI 里不现实，用「200 次空转轮询的 CPU 时间」等价口径：
+// mtime 未变时 refresh() 只 stat 一次，不读盘不解析。
+const kwLog = path.join(os.tmpdir(), `bench-keywords-${process.pid}.log`);
+fs.writeFileSync(kwLog, 'Disabled keywords: A B C\n', 'utf8');
+const kwSrc = new UnityKeywordSource({ logPath: kwLog });
+kwSrc.refresh(true);
+const cpuBefore = process.cpuUsage();
+for (let k = 0; k < 200; k++) kwSrc.refresh(false);
+const cpuDelta = process.cpuUsage(cpuBefore);
+const cpuDeltaUs = cpuDelta.user + cpuDelta.system; // 微秒
+fs.rmSync(kwLog, { force: true });
+
 const results = [
   { name: '冷启动全量索引', value: coldMs, limit: 3000, unit: 'ms' },
   { name: '增量编辑（中位数）', value: medianMs, limit: 100, unit: 'ms' },
@@ -325,6 +407,11 @@ const results = [
   { name: 'references（中位数）', value: refMedian, limit: 500, unit: 'ms' },
   { name: 'references（p95）', value: refP95, limit: 500, unit: 'ms' },
   { name: `rename（≤50 处，实测 ${rnOcc} 处）`, value: rnMedian, limit: 1000, unit: 'ms' },
+  { name: `语法诊断（${diagLines} 行，中位数）`, value: diagMedian, limit: 150, unit: 'ms' },
+  { name: `语法诊断（${diagLines} 行，p95）`, value: diagP95, limit: 150, unit: 'ms' },
+  { name: `死分支求值（${deadText.split('\n').length} 行，中位数）`, value: deadMedian, limit: 150, unit: 'ms' },
+  { name: `死分支求值（${deadText.split('\n').length} 行，p95）`, value: deadP95, limit: 150, unit: 'ms' },
+  { name: '关键字轮询空转（200 次，CPU 时间）', value: cpuDeltaUs / 1000, limit: 20, unit: 'ms' },
   { name: '补全后索引规模变化（应为 0）', value: compIndexDelta, limit: 1, unit: 'files' },
   { name: 'F12 后索引规模变化（应为 0）', value: indexDelta, limit: 1, unit: 'files' },
   { name: '索引后 RSS', value: rssAfterIndex, limit: 500, unit: 'MB' },
@@ -360,6 +447,21 @@ console.log(
         symbol: rnName,
         occurrences: rnOcc,
         edits: rnEdits,
+      },
+      diagnostics: {
+        lines: diagLines,
+        samples: diagSamples.length,
+        diagnostics: diagCount,
+        median: +diagMedian.toFixed(2),
+        p95: +diagP95.toFixed(2),
+      },
+      deadBranch: {
+        lines: deadText.split('\n').length,
+        regions: deadRegionCount,
+        samples: deadSamples.length,
+        median: +deadMedian.toFixed(2),
+        p95: +deadP95.toFixed(2),
+        keywordIdleCpuMs: +(cpuDeltaUs / 1000).toFixed(2),
       },
       results: results.map((r) => ({
         name: r.name,

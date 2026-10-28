@@ -34,3 +34,71 @@ struct appdata_base {
     name: (identifier)
     parameters: (preproc_params (identifier))
     value: (preproc_arg)))
+
+==============================
+文件作用域裸宏调用不带分号（T-034 补丁）
+==============================
+
+UNITY_INSTANCING_BUFFER_START(Props)
+UNITY_INSTANCING_BUFFER_END(Props)
+
+---
+
+(translation_unit
+  (macro_statement (identifier) (identifier))
+  (macro_statement (identifier) (identifier)))
+
+==============================
+控制流提示宏独占一行紧接 if（T-034 补丁）
+==============================
+
+void f(float a) {
+    UNITY_BRANCH
+    if (a > 0.0) { g(); }
+}
+
+---
+
+(translation_unit
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (identifier))))
+    body: (compound_statement
+      (macro_bare)
+      (if_statement
+        condition: (condition_clause
+          value: (binary_expression
+            left: (identifier)
+            right: (number_literal)))
+        consequence: (compound_statement
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))))))
+
+==============================
+函数体内裸宏调用不带分号（T-034 补丁）
+==============================
+
+void v(Data data) {
+    TRANSFER_SHADOW(data)
+}
+
+---
+
+(translation_unit
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (parameter_declaration
+          type: (type_identifier)
+          declarator: (identifier))))
+    body: (compound_statement
+      (macro_statement (identifier) (identifier)))))

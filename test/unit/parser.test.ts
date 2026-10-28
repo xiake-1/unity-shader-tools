@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   parseShaderLab,
+  parseHlslFile,
   extractProgramBodies,
   buildVirtualHlsl,
   countErrorNodes,
@@ -71,5 +72,40 @@ describe('ShaderLab 外壳解析', () => {
     );
     const before = virtualText.slice(0, body.startByte - 1);
     expect(/[^\s]/.test(before)).toBe(false);
+  });
+});
+
+describe('T-034：错误节点判定与 Unity 宏语句补丁', () => {
+  it('MISSING 节点的 type 是缺失 token 名；countErrorNodes 必须计入', () => {
+    const tree = parseHlslFile('float4 f(){\n  float a = 1\n  return a;\n}\n');
+    const missing: string[] = [];
+    walk(tree.rootNode, (n) => {
+      if (n.isMissing) missing.push(n.type);
+    });
+    expect(missing).toContain(';');
+    // 旧写法 `node.type === 'MISSING'` 恒为 false，MISSING 从未被计入（语料里 219 处因此隐形）
+    expect(countErrorNodes(tree.rootNode)).toBeGreaterThan(0);
+  });
+
+  it('不带分号的 Unity 宏语句不再产 ERROR/MISSING（语料第一名模式）', () => {
+    const src = [
+      'UNITY_INSTANCING_BUFFER_START(Props)',
+      'UNITY_INSTANCING_BUFFER_END(Props)',
+      'void v(Data d) {',
+      '    TRANSFER_SHADOW(d)',
+      '    UNITY_BRANCH',
+      '    if (d.f > 0.0) { g(); }',
+      '}',
+    ].join('\n');
+    expect(countErrorNodes(parseHlslFile(src).rootNode)).toBe(0);
+  });
+
+  it('带分号的宏调用仍走原解释：symbolIndex 依赖的 call_expression 形态不被 macro_statement 抢走', () => {
+    const tree = parseHlslFile('TEXTURE2D(_MainTex);\n');
+    expect(countErrorNodes(tree.rootNode)).toBe(0);
+    const types = new Set<string>();
+    walk(tree.rootNode, (n) => types.add(n.type));
+    expect(types.has('call_expression'), 'call_expression').toBe(true);
+    expect(types.has('macro_statement'), 'macro_statement').toBe(false);
   });
 });

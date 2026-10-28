@@ -390,6 +390,14 @@
         "named": true
       },
       {
+        "type": "macro_bare",
+        "named": true
+      },
+      {
+        "type": "macro_statement",
+        "named": true
+      },
+      {
         "type": "return_statement",
         "named": true
       },
@@ -1306,6 +1314,14 @@
         },
         {
           "type": "labeled_statement",
+          "named": true
+        },
+        {
+          "type": "macro_bare",
+          "named": true
+        },
+        {
+          "type": "macro_statement",
           "named": true
         },
         {
@@ -4051,6 +4067,11 @@
     }
   },
   {
+    "type": "macro_bare",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "macro_member",
     "named": true,
     "fields": {},
@@ -4064,6 +4085,25 @@
         },
         {
           "type": "primitive_type",
+          "named": true
+        },
+        {
+          "type": "type_identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "macro_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
           "named": true
         },
         {
@@ -6789,6 +6829,14 @@
           "named": true
         },
         {
+          "type": "macro_bare",
+          "named": true
+        },
+        {
+          "type": "macro_statement",
+          "named": true
+        },
+        {
           "type": "namespace_alias_definition",
           "named": true
         },
@@ -7566,6 +7614,14 @@
     "named": false
   },
   {
+    "type": "CBUFFER_END",
+    "named": false
+  },
+  {
+    "type": "FLATTEN",
+    "named": false
+  },
+  {
     "type": "L\"",
     "named": false
   },
@@ -7591,6 +7647,14 @@
   },
   {
     "type": "U'",
+    "named": false
+  },
+  {
+    "type": "UNITY_BRANCH",
+    "named": false
+  },
+  {
+    "type": "UNITY_FLATTEN",
     "named": false
   },
   {
@@ -7767,6 +7831,10 @@
   },
   {
     "type": "alignof",
+    "named": false
+  },
+  {
+    "type": "allow_uav_condition",
     "named": false
   },
   {
