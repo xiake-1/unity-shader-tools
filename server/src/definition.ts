@@ -44,10 +44,10 @@ const PRAGMA_FUNCTION_KEYWORDS = new Set([
 ]);
 
 /** 名字类 token（ShaderLab 的 `word` 单独处理：只有 Properties 属性名可跳） */
-const NAME_TYPES = new Set(['identifier', 'field_identifier', 'type_identifier']);
+export const NAME_TYPES = new Set(['identifier', 'field_identifier', 'type_identifier']);
 
 /** 字面量 / 无语义 token：这些位置没有定义可言 */
-const LITERAL_TYPES = new Set([
+export const LITERAL_TYPES = new Set([
   'comment',
   'number_literal',
   'bool_literal',
@@ -74,7 +74,7 @@ export interface DefinitionContext {
   maxLocations?: number;
 }
 
-interface DocTrees {
+export interface DocTrees {
   text: string;
   labTree: Tree | null;
   hlslTree: Tree | null;
@@ -107,7 +107,7 @@ function isFile(p: string): boolean {
   }
 }
 
-function offsetAt(text: string, line: number, character: number): number {
+export function offsetAt(text: string, line: number, character: number): number {
   let off = 0;
   let row = 0;
   while (row < line && off < text.length) {
@@ -129,8 +129,8 @@ function buildTrees(file: string, text: string, storeTree: Tree | null): DocTree
   return { text, labTree, hlslTree, bodies };
 }
 
-function docTrees(file: string, ctx: DefinitionContext): DocTrees | null {
-  const doc = ctx.store.get(file);
+export function docTrees(file: string, store: DocumentStore): DocTrees | null {
+  const doc = store.get(file);
   if (doc) {
     if (doc.generated || !doc.tree) return null;
     const hit = byStoreTree.get(doc.tree);
@@ -191,6 +191,26 @@ function ancestor(node: SyntaxNode, type: string): SyntaxNode | null {
   return null;
 }
 
+/** 光标处的树与 token（F12 / 补全 / 引用 / 改名共用同一选择逻辑：
+ *  ShaderLab 外壳 vs 虚拟 HLSL 按 program body 偏移切换）。references/rename 复用（T-029）。 */
+export function nodeAtCursor(
+  file: string,
+  line: number,
+  character: number,
+  store: DocumentStore
+): { trees: DocTrees; node: SyntaxNode } | null {
+  const trees = docTrees(file, store);
+  if (!trees) return null;
+  const { text, labTree, hlslTree, bodies } = trees;
+  const offset = offsetAt(text, line, character);
+  const inProgram = bodies.some(
+    (b) => (b.kind === 'hlsl' || b.kind === 'cg') && offset >= b.startByte && offset < b.endByte
+  );
+  const tree = labTree && !inProgram ? labTree : hlslTree;
+  if (!tree) return null;
+  return { trees, node: tree.rootNode.descendantForPosition({ row: line, column: character }) };
+}
+
 /** `#include "A.hlsl"` / `#include <A.cginc>` 的规格文本 */
 function includeSpec(inc: SyntaxNode): string | null {
   const lit = inc.children.find((c) =>
@@ -226,26 +246,35 @@ function pragmaFunctionName(node: SyntaxNode, character: number): string | null 
 }
 
 /** include 闭包：文件 → 顺序号（1 起），用于「include 闭包」这一档的内部排序 */
-function closureOrder(file: string, ctx: DefinitionContext): Map<string, number> {
+export function closureOrder(
+  file: string,
+  index: SymbolIndex,
+  includeCtx: IncludeContext
+): Map<string, number> {
   const resolve = (spec: string, from: string): string | null =>
-    resolveInclude(spec, from, ctx.includeCtx).resolved;
-  const files = ctx.index.includeClosure(file, resolve);
+    resolveInclude(spec, from, includeCtx).resolved;
+  const files = index.includeClosure(file, resolve);
   const map = new Map<string, number>();
   files.forEach((f, i) => map.set(norm(f), i + 1));
   return map;
 }
 
-function rankOf(loc: SymbolLocation, file: string, closure: Map<string, number>, ctx: DefinitionContext): number {
+export function rankOf(
+  loc: SymbolLocation,
+  file: string,
+  closure: Map<string, number>,
+  env: { includeCtx: IncludeContext; projectRoot: string | null }
+): number {
   if (samePath(loc.file, file)) return 0;
   if (closure.has(norm(loc.file))) return 1;
-  if (under(loc.file, ctx.includeCtx.cgIncludesDir)) return 4;
-  if (under(loc.file, ctx.includeCtx.packageCacheDir)) return 3;
-  if (under(loc.file, ctx.projectRoot)) return 2;
+  if (under(loc.file, env.includeCtx.cgIncludesDir)) return 4;
+  if (under(loc.file, env.includeCtx.packageCacheDir)) return 3;
+  if (under(loc.file, env.projectRoot)) return 2;
   return 2;
 }
 
 function sortLocations(locs: SymbolLocation[], file: string, ctx: DefinitionContext): SymbolLocation[] {
-  const closure = closureOrder(file, ctx);
+  const closure = closureOrder(file, ctx.index, ctx.includeCtx);
   const key = (l: SymbolLocation): number => {
     const r = rankOf(l, file, closure, ctx);
     const inner = r === 1 ? (closure.get(norm(l.file)) ?? 0) : 0;
@@ -285,13 +314,14 @@ function globalLocations(name: string, file: string, ctx: DefinitionContext): Sy
   return sortLocations(info.locations, file, ctx);
 }
 
-/** 变量声明处的类型名：先看当前作用域链，再看当前文件顶层，最后按 include 闭包限量解析 */
-function declaredTypeOf(
+/** 变量声明处的类型名：先看当前作用域链，再看当前文件顶层，最后按 include 闭包限量解析。
+ *  M3 补全的成员上下文共用此浅推断（feature-completion 约束：不写第二套）。 */
+export function declaredTypeOf(
   base: string,
   node: SyntaxNode,
   file: string,
   trees: DocTrees,
-  ctx: DefinitionContext
+  env: { index: SymbolIndex; includeCtx: IncludeContext }
 ): string | null {
   const local = localDeclaredType(node, base);
   if (local) return local;
@@ -300,8 +330,8 @@ function declaredTypeOf(
     if (t) return t;
   }
   const resolve = (spec: string, from: string): string | null =>
-    resolveInclude(spec, from, ctx.includeCtx).resolved;
-  for (const f of ctx.index.includeClosure(file, resolve).slice(0, TYPE_SEARCH_FILE_LIMIT)) {
+    resolveInclude(spec, from, env.includeCtx).resolved;
+  for (const f of env.index.includeClosure(file, resolve).slice(0, TYPE_SEARCH_FILE_LIMIT)) {
     if (samePath(f, file)) continue;
     const tree = parseHlslFromDisk(f);
     if (!tree) continue;
@@ -342,7 +372,7 @@ export function provideDefinition(
   character: number,
   ctx: DefinitionContext
 ): Location[] {
-  const trees = docTrees(file, ctx);
+  const trees = docTrees(file, ctx.store);
   if (!trees) return [];
   const { text, labTree, hlslTree, bodies } = trees;
 

@@ -24,6 +24,10 @@ import { discoverUnityEnvironment, type UnityEnvironment } from './unityProject'
 import { resolveInclude, type IncludeContext } from './includeResolver';
 import { isGeneratedFile } from './tempFiles';
 import { provideDefinition } from './definition';
+import { provideCompletion } from './completion';
+import { provideHover } from './hover';
+import { provideReferences } from './references';
+import { prepareRename, rename } from './rename';
 
 interface Settings {
   trace: 'off' | 'messages' | 'verbose';
@@ -219,6 +223,14 @@ export function start(): void {
       capabilities: {
         textDocumentSync: TextDocumentSyncKind.Incremental,
         definitionProvider: true, // M2 转到定义（规格 feature-go-to-definition）
+        completionProvider: {
+          // M3 语义补全（规格 feature-completion，T-022）
+          triggerCharacters: ['.', '"', '/', '\\'],
+          resolveProvider: false, // M3 文档内联，不做二段 resolve
+        },
+        referencesProvider: true, // M3 引用查找（规格 feature-rename，T-029）
+        renameProvider: { prepareProvider: true }, // M3 重命名两步流程（T-030）
+        hoverProvider: true, // 悬停（规格 feature-hover，T-035）
         workspace: {
           fileOperations: {},
           // LSP 3.17 的静态 watched-files 能力在 workspace 下，类型定义未覆盖
@@ -303,6 +315,108 @@ export function start(): void {
     }
   });
 
+  // M3 语义补全（T-022～T-027）：生成文件不响应；索引进行中立即返回当前结果
+  connection.onCompletion((params) => {
+    const file = uriToFsPath(params.textDocument.uri);
+    if (isGeneratedFile(file)) {
+      log(`completion suppressed for generated file: ${file}`);
+      return { isIncomplete: false, items: [] };
+    }
+    try {
+      return provideCompletion(file, params.position.line, params.position.character, {
+        index,
+        store,
+        includeCtx: includeCtx(),
+        projectRoot: env.projectRoot,
+        log,
+        indexing: () => indexing,
+      });
+    } catch (err) {
+      log(`completion failed: ${(err as Error).message}`);
+      return { isIncomplete: false, items: [] };
+    }
+  });
+
+  // 悬停（T-035，规格 feature-hover）：生成文件不响应；异常吞掉返回 null
+  connection.onHover((params) => {
+    const file = uriToFsPath(params.textDocument.uri);
+    if (isGeneratedFile(file)) {
+      log(`hover suppressed for generated file: ${file}`);
+      return null;
+    }
+    try {
+      return provideHover(file, params.position.line, params.position.character, {
+        index,
+        store,
+        includeCtx: includeCtx(),
+        projectRoot: env.projectRoot,
+        log,
+        indexing: () => indexing,
+      });
+    } catch (err) {
+      log(`hover failed: ${(err as Error).message}`);
+      return null;
+    }
+  });
+
+  // M3 引用查找（T-029）：生成文件不响应；上限 200 按优先级截断
+  connection.onReferences((params) => {
+    const file = uriToFsPath(params.textDocument.uri);
+    if (isGeneratedFile(file)) {
+      log(`references suppressed for generated file: ${file}`);
+      return [];
+    }
+    try {
+      return provideReferences(
+        file,
+        params.position.line,
+        params.position.character,
+        {
+          index,
+          store,
+          includeCtx: includeCtx(),
+          projectRoot: env.projectRoot,
+          log,
+          indexing: () => indexing,
+        },
+        !!params.context.includeDeclaration
+      );
+    } catch (err) {
+      log(`references failed: ${(err as Error).message}`);
+      return [];
+    }
+  });
+
+  // M3 重命名（T-030/T-031）：prepareRename 拒绝内置/包内；rename 只生成用户源 edit；
+  // Properties 属性改名后发 Info 资产失效提示
+  connection.onPrepareRename((params) => {
+    const file = uriToFsPath(params.textDocument.uri);
+    const ctx = {
+      index,
+      store,
+      includeCtx: includeCtx(),
+      projectRoot: env.projectRoot,
+      log,
+      indexing: () => indexing,
+    };
+    const r = prepareRename(file, params.position.line, params.position.character, ctx);
+    return r;
+  });
+
+  connection.onRenameRequest((params) => {
+    const file = uriToFsPath(params.textDocument.uri);
+    const ctx = {
+      index,
+      store,
+      includeCtx: includeCtx(),
+      projectRoot: env.projectRoot,
+      log,
+      indexing: () => indexing,
+      notifyInfo: (msg: string) => void connection.window.showInformationMessage(msg),
+    };
+    return rename(file, params.position.line, params.position.character, params.newName, ctx);
+  });
+
   // 测试钩子：模拟 server 崩溃，验证客户端重启策略（T-002 验收）
   connection.onExecuteCommand(async (params) => {
     if (params.command === 'unityshader/__testCrash') {
@@ -322,6 +436,7 @@ export function start(): void {
         pid: process.pid, // 集成测试据此断言进程身份与重启
         files: index.fileCount,
         symbols: index.symbolCount,
+        indexing, // 集成测试据此等待首轮扫描完成（补全候选依赖包内符号）
         degraded: env.degradedReasons,
         includeRoots: includeCtx(),
       };

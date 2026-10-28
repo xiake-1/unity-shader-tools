@@ -4,6 +4,7 @@ dist/
 build/
 *.vsix
 grammar/src/parser.c
+hlsl/src/parser.c
 .vscode-test/
 playground-profile/
 tree-sitter.exe
