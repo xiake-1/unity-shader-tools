@@ -6,13 +6,13 @@ updated: 2026-10-28
 
 ## 进度
 
-sprint-02 的 7 项全部完成（T-014～T-020），roadmap **M2 转到定义置 done**；
-四条验证命令全绿：`npm run build` exit 0、`npm test` 115 例、`npm run test:vscode` 12/12、
-`npm run bench` PASS（F12 中位数 0.40 ms / P95 5.76 ms）。
+sprint-01（M1 地基）、sprint-02（M2 转到定义）、sprint-03（M3 补全与引用）均已完成（T-001～T-033）；
+2026-10-28 手动测试三轮修复与 T-035/T-036（悬停 + 语义补全）完成，细节见 [log.md](log.md) 当日事件（含 ADR 0007）。
+四条验证命令全绿：`npm test` 213 例 / 17 文件、`npm run test:vscode` 26/26、`npm run bench` PASS（悬停 p95 0.4ms）。
 
 ## 进行中
 
-无。
+无（无迭代在跑）。
 
 ## 阻塞
 
@@ -20,5 +20,4 @@ sprint-02 的 7 项全部完成（T-014～T-020），roadmap **M2 转到定义�
 
 ## 下一步
 
-无（backlog 为空）。下一批候选（M3 语义补全 + Rename、ADR 0006 第 2/3 层、ADR 0005 发布流水线）
-须先立规格或排期，登记在 [../plan/backlog.md](../plan/backlog.md) 的「尚未入 backlog 的功能任务」节。
+T-034

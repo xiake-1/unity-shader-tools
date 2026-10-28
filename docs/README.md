@@ -1,6 +1,6 @@
 ---
 status: active
-updated: 2026-10-27
+updated: 2026-10-28
 ---
 # 文档索引
 
@@ -11,6 +11,7 @@ updated: 2026-10-27
 | ① 概览 | [project.md](project.md) | 目标、范围、技术栈、设计原则 |
 | ② 计划 | [plan/roadmap.md](plan/roadmap.md) | 阶段、里程碑、验收标准 |
 |    | [plan/backlog.md](plan/backlog.md) | 未完成任务唯一权威 |
+|    | [plan/sprint-03.md](plan/sprint-03.md) | 当前迭代（M3 补全与引用） |
 |    | [plan/sprint-02.md](plan/sprint-02.md) | 已完成迭代（M2 转到定义） |
 |    | [plan/sprint-01.md](plan/sprint-01.md) | 已完成迭代（M1 地基） |
 | ③ 规格 | [specs/](specs/) | 功能规格（见目录内列表） |
@@ -25,6 +26,11 @@ updated: 2026-10-27
 |---|---|---|
 | [specs/feature-language-server-core.md](specs/feature-language-server-core.md) | `src/server/`、`src/grammar/` | active |
 | [specs/feature-go-to-definition.md](specs/feature-go-to-definition.md) | `src/server/`（definition + 作用域解析）、`src/client/`（能力声明） | active |
+| [specs/feature-completion.md](specs/feature-completion.md) | `server/src/`（completion + 候选组装）、`client/src/`（能力声明） | active |
+| [specs/feature-hover.md](specs/feature-hover.md) | `server/src/`（hover + 自写语义表）、`client/src/`（能力声明） | active |
+| [specs/feature-rename.md](specs/feature-rename.md) | `server/src/`（references + rename + 联动改名）、`client/src/`（能力声明） | active |
+| [specs/feature-syntax-diagnostics.md](specs/feature-syntax-diagnostics.md) | `server/src/`（diagnostics + errorExemption）、`client/src/`（配置项） | active |
+| [specs/feature-dead-branch-dimming.md](specs/feature-dead-branch-dimming.md) | `server/src/`（unityKeywordSource + preprocessorEval + inactiveRegions）、`client/src/`（装饰 + 命令） | active |
 
 ## ADR 清单
 
@@ -36,8 +42,11 @@ updated: 2026-10-27
 | [0004-dxc-type-diagnostics.md](decisions/0004-dxc-type-diagnostics.md) | HLSL 类型诊断外包 DXC，不自研类型系统 | — |
 | [0005-grammar-prebuild-distribution.md](decisions/0005-grammar-prebuild-distribution.md) | grammar 与 tree-sitter 运行时以 N-API prebuilds 随单一 VSIX 附带（不安装期编译、不走 WASM） | — |
 | [0006-language-id-vstu-coexistence.md](decisions/0006-language-id-vstu-coexistence.md) | 主 id 保持 `unityshader`/`hlsl`；与 VSTU 的 `UnityShader` 靠 documentSelector + 运行时自愈 + 修复命令共存 | — |
+| [0007-fork-tree-sitter-hlsl-workspace.md](decisions/0007-fork-tree-sitter-hlsl-workspace.md) | fork tree-sitter-hlsl 为 workspace 包 `hlsl/`，struct 裸宏成员与跨行宏块注释补丁本地维护 | — |
+| [0008-dead-branch-dimming-editor-log.md](decisions/0008-dead-branch-dimming-editor-log.md) | 死分支灰化：关键字取 Unity `Editor.log` 的 `Disabled keywords:`，求值在 server、呈现走 LSP 扩展通知 + 客户端装饰 | — |
+| [0009-syntax-diagnostics-error-exemption.md](decisions/0009-syntax-diagnostics-error-exemption.md) | 语法诊断误报控制：grammar 继续修 + ERROR 模式豁免表 + 官方语料零误报门槛测试 | — |
 
-（无取代关系。ADR 0005 结清 0001 留下的「native/WASM + 打包工具」未决项；ADR 0006 把 log 22:00 的语言 id 拆分登记为决策。将来若支持 vscode.dev，需 WASM + 非 stdio 宿主，届时另立 ADR 取代 0005 与 0002 的相关部分。）
+（无取代关系。ADR 0005 结清 0001 留下的「native/WASM + 打包工具」未决项；ADR 0006 把 log 22:00 的语言 id 拆分登记为决策；ADR 0007 调整 0001 中「现成 tree-sitter-hlsl」的含义（现为本地 fork workspace 包），并要求 0005 的 prebuild 从 fork 出产物。ADR 0008 界定 0002 的「不造私有协议」＝不脱离 LSP 通道（`$/…` 扩展通知允许），并把「M6 桥是否取代 Editor.log 作关键字源」登记为未决项；ADR 0009 承接 0004 与 0007 的后果，只补「误报怎么控」。将来若支持 vscode.dev，需 WASM + 非 stdio 宿主，届时另立 ADR 取代 0005 与 0002 的相关部分。）
 
 ## 分析文档（`分析/`，只读证据，不参与状态流转）
 

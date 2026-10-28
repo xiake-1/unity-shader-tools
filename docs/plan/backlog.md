@@ -11,15 +11,19 @@ updated: 2026-10-28
 
 ## 待办
 
-无。下一批功能任务（语义补全 / Rename / 诊断等）须先写规格再拆入，见下一节。
+- [ ] T-034 HLSL 语料剩余 ERROR 模式清理（维护类；依据 log 11:30 与 ADR 0007 已知限制）。
+  范围：①`#if` 块内外不平衡括号（AutoLight.cginc、UnityStandardCore.cginc 参数列表）；
+  ②文件作用域带 primitive 参数的裸宏调用（`UNITY_DEFINE_INSTANCED_PROP(float, x)`）；
+  ③ShaderGraph 模板 `$` 占位符文件与 ffx 宏 typedef 的索引豁免。
+  验收：审计脚本（叶子 ERROR 模式聚合）固化进 `test/`；HLSL 语料含 ERROR 文件占比给出实测值与
+  逐模式豁免说明；每模式有解析测试或明确的「不修+理由」记录。
 
 ## 尚未入 backlog 的功能任务
 
 以下功能已确认在范围内，但按规范 §6「功能需求必须基于已确认规格」，**须先写规格再拆入 backlog**，
 对应里程碑见 [roadmap.md](roadmap.md)：
 
-语义补全（M3）、Rename（M3）、语法诊断（M4）、`#if` 死分支灰化（M4）、
-类型诊断 DXC（M5）、代码格式化（M5）、Unity 包侧（M6）。
+语法诊断（M4）、`#if` 死分支灰化（M4）、类型诊断 DXC（M5）、代码格式化（M5）、Unity 包侧（M6）。
 
 另有两项已决策但**不可直接建功能任务**，原因各异：
 

@@ -204,3 +204,112 @@
 ## 2026-10-28 00:41 · 其他：状态文档按规范收敛，根 README 的「当前状态」行校正
 - 结果: `progress/status.md` 重写为规范 §2 的四段格式（进度 3 行、进行中/阻塞为「无」、下一步只给 ID 指向）；`plan/sprint-02.md` 删掉临时加的「迭代结果」段——结果与证据归 log，sprint 只留目标 / ID / 边界 / 验收条件；根 `README.md` 的「当前状态」行自 M1 起一直写着「docs 骨架已建立，尚未开始编码」，校正为「M1 地基与 M2 转到定义已完成，M3 待立规格」
 - 验证证据: `status.md` 实测 24 行（≤40 上限）；`backlog.md` 中 `- [ ]` 计数为 0；`plan/sprint-02.md` frontmatter `status: done` 且正文无任务状态描述；roadmap M2 节标题为 `（done）`
+
+## 2026-10-28 07:57 · 其他：M3 拆项入 backlog（T-021～T-033）
+- 结果: 十三条功能任务拆自两份已确认规格——`spec:feature-completion` 七条（T-021 索引前缀查询与邻近注释存储、T-022 completion 核心与上下文判定、T-023 struct 成员、T-024 `#include` 路径、T-025 Unity API 与用户宏 + 文档兜底链、T-026 过滤/排序/截断、T-027 集成与 P95<150ms 基准）；`spec:feature-rename` 六条（T-028 occurrence 收集扩展、T-029 references 核心、T-030 rename 核心与新名校验、T-031 Properties/`sampler_` 联动与资产提示、T-032 零误改回归语料、T-033 集成与性能基准）。roadmap M3 置 active 并加「范围补充」行；backlog「尚未入 backlog」节只剩 M4～M6。未建 sprint-03（开迭代时再选入）
+- 验证证据: 新 ID 起于历史最大号 T-020 之后（grep `T-0(2[1-9]|[3-9]\d)` 全 docs 仅命中 conventions.md 示例文本，无重复无复用）；十三条均含「依据: spec:<已确认规格> + 可验证验收」；两份规格 `docs/specs/feature-completion.md`、`docs/specs/feature-rename.md` 六节齐备且已在 `docs/README.md` 与 `docs/specs/README.md` 登记
+
+## 2026-10-28 08:42 · 其他：开 sprint-03（M3 补全与引用），status 与根 README 承接
+- 结果: 新建 `plan/sprint-03.md`（frontmatter active；只引用 ID，选入 T-021～T-033 全部十三条；边界节明确本轮不做 M4/M5/M6、一般标识符补全、宏展开、资产改写、内置改名、预处理器求值）；`docs/README.md` 计划区登记当前迭代；`progress/status.md` 重写为四段格式（进行中＝无、下一步＝前置 ID）；根 `README.md`「当前状态」行由「M3 待立规格」校正为「M3 经 sprint-03 进行中」
+- 验证证据: `plan/sprint-03.md` 存在且选入 ID 与 `backlog.md` 待办 13 条 `- [ ]` 一一对应（grep 计数一致）、正文无任务状态描述；`status.md` 实测 22 行（≤40 上限）、「下一步」仅 ID；根 README 19 行（≤60 上限）
+
+## 2026-10-28 08:53 · 任务完成：T-021 索引扩展：前缀查询 API + 邻近注释存储
+- 任务: T-021 索引扩展：按前缀查名 API + `#define`/函数声明邻近注释随索引存储
+- 结果: `symbolIndex.ts` 新增 `queryByPrefix`（惰性排序名表 + 二分定位，大小写敏感、字典序、limit；`indexFile`/`removeFile` 时失效重建）与 `fileNames()`（T-028 遍历用）；`SymbolInfo.doc` 由 `precedingComment()` 抓取 `preproc_def`/`function_definition` 上方连续注释兄弟（行注释去 `//`、块注释去界符与 `*` 对齐符），同名逻辑符号合并取第一个非空 doc
+- 验证证据: `npx vitest run test/unit/completionIndex.test.ts test/unit/symbolIndex.test.ts` → 19 passed（新增 10 例：大小写敏感/字典序/空结果/limit/removeFile 失效/行注释/多行连续/块注释/无注释→undefined/kind 正确）；`node --expose-gc test/bench/run.mjs` → `bench PASS`（冷索引/增量/RSS/F12 各项无回退）
+
+## 2026-10-28 09:11 · 任务完成：T-022 completion 核心：能力声明与上下文判定
+- 任务: T-022 completion 核心：能力声明（`completionProvider` + triggerCharacters）与上下文判定（成员 / include 字符串 / 标识符 / 空结果面）
+- 结果: 新建 `server/src/completion.ts`：`detectCompletionSite` 按光标前一 token 判四类站点（`.`/`.` 后部分名 → 成员；`preproc_include` 字符串内 → 路径；HLSL 侧标识符 → 宏/函数；注释、字面量、非 include 字符串、ShaderLab 外壳 → 空）；树选择与 F12 共用 `definition.ts` 的 `docTrees` 缓存（ShaderLab 外壳树 vs 虚拟 HLSL 树按 program body 偏移切换），无第二套解析。`server.ts` 声明 `completionProvider`（triggerCharacters `[".","\"","/","\\"]`、`resolveProvider:false`）并接 `onCompletion`（生成文件抑制、异常兜底空列表）
+- 验证证据: `test/unit/completion.test.ts` T-022 组 5 例绿（含真实 stdio 握手断言 `initialize.capabilities.completionProvider.triggerCharacters == [".","\"","/","\\"]`——能力声明按 M2 先例走 stdio 而非 vscode-test）；`npx vitest run` 全量 154 passed
+
+## 2026-10-28 09:11 · 任务完成：T-023 struct 成员补全
+- 任务: T-023 struct 成员补全（复用 `scopeResolver` 单层浅推断，不写第二套）
+- 结果: `symbolIndex.ts` 新增 `structFields` 视图（`indexFile` 按 `loc.owner` 维护、`removeFile` 按 `structOwners` 清理）与 `fieldsOfStruct()`；`completion.ts` 成员候选复用 `definition.ts` 导出的 `declaredTypeOf`（局部→全局浅推断）+ `rankOf`；链式 `g.uv.`（base 非 identifier）与未知变量 → 空列表
+- 验证证据: completion.test.ts T-023 组 6 例绿（`i.` 全字段 kind=Field、前缀 `i.u` 只剩 uv、跨文件 `s.al`→inc.hlsl 的 alpha、链式/未知变量负例、字段与内置函数 `mul` 同名不吞候选）；全量 vitest 154 passed
+
+## 2026-10-28 09:11 · 任务完成：T-024 `#include` 路径补全
+- 任务: T-024 `#include` 路径补全（复用 `includeResolver` 四类 + 包内 ShaderLibrary 枚举）
+- 结果: `includeCandidates` 按四类规则枚举（同目录 → rank0；`Assets/**`、嵌入 `Packages/**` → rank2；PackageCache `com.unity.render-pipelines.*` 的 `ShaderLibrary/**` 以 `Packages/<pkg>/ShaderLibrary/…` 形式 → rank3；CGIncludes 裸名 → rank4），目录枚举按 mtime 缓存（`clearCompletionCache` 可清）；候选以 `textEdit` 替换整段字符串内容；前缀正斜杠归一 + 大小写不敏感过滤
+- 验证证据: completion.test.ts T-024 组 5 例绿（内置裸名/同目录/Assets 前缀/PackageCache 回退/textEdit range 覆盖内容段）；集成「include 路径补全」✓（fixture PackageCache 下命中 `Packages/com.unity.render-pipelines.core/ShaderLibrary/SpaceTransforms.hlsl`）
+
+## 2026-10-28 09:11 · 任务完成：T-025 Unity/URP API 与用户宏候选 + 文档兜底链
+- 任务: T-025 Unity/URP API 与用户宏候选 + 文档兜底链（源码注释 → macroTable → 空）
+- 结果: `identifierCandidates` = 用户宏（当前文件/闭包）+ Unity API（包内/内置的宏与函数），一般变量/struct 名/工程函数按规格排除；文档 = `SymbolInfo.doc`（T-021 邻近注释）→ `macroTable.macroDescription()`（新增 `MACRO_DESCRIPTIONS` 自写简述，含 `SAMPLE_TEXTURE2D` 等高频采样宏——真实源码处无注释）→ 空。修索引缺口：函数式宏是 `preproc_function_def` 节点，`extractHlsl` 此前只收 `preproc_def`，Unity 宏几乎全是函数式形态
+- 验证证据: completion.test.ts T-025 组 6 例绿（TransformWorldToHClip 注释文档、SAMPLE_TEXTURE2D 注释文档、用户宏无注释→doc undefined、闭包宏 OrdInc rank1、TEXTURE2D→macroTable 兜底、范围外类别不出现）；集成「Unity 宏补全带文档」✓（文档=「对 2D 纹理按 UV 采样…」）；修 `preproc_function_def` 后全量 vitest 152→154 passed
+
+## 2026-10-28 09:11 · 任务完成：T-026 服务端前缀过滤 / 五层排序 / 截断与 isIncomplete
+- 任务: T-026 服务端前缀过滤 / 五层排序 / 截断与 `isIncomplete`
+- 结果: 前缀过滤走 `queryByPrefix`（大小写敏感、二分）；候选以 `sortText = "rank|label"` 表达五层优先级（当前文件0→闭包1→工程2→包3→内置4；标识符候选实际只出现 0/1/3/4 层，工程层按范围规则不进候选）；>300 截断 → `isIncomplete:true` + 日志 `completion: truncated=<total> kept=300`；索引进行中照常返回并记日志
+- 验证证据: completion.test.ts T-026 组 4 例绿（`SAM`/`sam` 大小写敏感、`Ord*` 排序 `[OrdCur,OrdInc,OrdPkg,OrdCg]`、351 候选→300 条 + `truncated=351`、索引进行中日志）；全量 vitest 154 passed
+
+## 2026-10-28 09:33 · 任务完成：T-027 补全集成与性能基准
+- 任务: T-027 补全集成与性能基准
+- 结果: 新增 `test/src/suite/completion.test.js` 7 例并注册进 suite/index.js；`__indexStats` 增 `indexing` 标志供集成等待首轮扫描完成；集成 fixture（runTest.js）扩为合成 PackageCache（core@14.0.12 ShaderLibrary 两文件）+ `.vscode/settings.json` 指 `unityShader.unityEditorPath` 到本机 Editor（CGIncludes 可用，degraded=no）；bench 增「补全（中位数/p95）」采样（成员+标识符混合、内存文档）与「补全后索引规模变化」项。实测事实：**VS Code 内置 word-based 补全会混进 `executeCompletionItemProvider` 结果且也带 sortText**，集成断言按我们的 sortText 形态 `^\d\|` 过滤「我们的候选」
+- 验证证据: `npm run test:vscode`（filter=T-027）→ 7/7 ✓；全量集成 → 19/19 ✓（definition/extension 无回归）；`node --expose-gc test/bench/run.mjs` → 补全中位数 1.88ms、p95 2.8ms（预算 150ms）、补全后索引变化 0、`bench PASS`；vitest 154 passed
+
+## 2026-10-28 09:45 · 任务完成：T-028 索引 occurrence 收集扩展
+- 任务: T-028 索引 occurrence 收集扩展：逻辑符号合并视图 + 按需重解析枚举同名 token（复用 `parser.ts`）
+- 结果: 新建 `server/src/occurrences.ts`——`collectOccurrences(name)` 遍历已索引文件名 → 廉价文本 `includes` 预筛 → 命中文件走 `docTrees`（与 F12/补全同一棵树与缓存，无第二套解析）枚举名字叶子 token（`identifier`/`type_identifier`/`field_identifier`/ShaderLab `word`）；`decl` 标志与索引 location 对齐；注释/字符串/语义天然不是名字 token 故不计数；`samplerOccurrences` 按 Unity 约定 `sampler_<名>`（前导下划线不重复：`_MainTex`→`sampler_MainTex`）；读不到/解析不了记日志 `occurrences: <名> unresolved=N`
+- 验证证据: `test/unit/occurrences.test.ts` 10 例绿（Properties word + HLSL 一次收齐、宏参数位 `TEXTURE2D(_MainTex)`、decl 三处对齐、注释两处不计数、大小写敏感、sampler 关联两处、新文件入索引即覆盖、打开文档编辑即时反映、unresolved=1 日志、无命中 scanned=0）；`npx vitest run` 全量 164 passed
+
+## 2026-10-28 09:52 · 任务完成：T-029 references 核心
+- 任务: T-029 references 核心：`referencesProvider`、`includeDeclaration`、优先级排序与 200 截断
+- 结果: 新建 `server/src/references.ts`——`resolveSymbolAt`（与 F12 共用 `nodeAtCursor` + 索引 + 浅推断，token→逻辑符号一条路径）分 global/member/local 三类；全局走 T-028 `collectOccurrences`，成员走 owner 过滤声明 + 左侧浅推断可解析使用处（不可解析记 `unresolved=N`），局部限当前函数体；`includeDeclaration` 过滤声明；五层 `rankOf` 排序；200 截断 + 日志 `truncated=<总数>`；Temp/生成文件过滤。`definition.ts` 导出 `NAME_TYPES`/`LITERAL_TYPES`/`nodeAtCursor` 供复用；server 声明 `referencesProvider` 并接 `onReferences`
+- 验证证据: `test/unit/references.test.ts` 8 例绿（`_MainTex` 收齐 Properties 声明/HLSL 声明/宏参数使用/跨文件/包内且注释不计数、`includeDeclaration:false` 只留使用处、当前文件→工程→包内排序、251 处→200 条 + `truncated=251`、Temp 误入索引仍被过滤、成员引用 v2f.uv 三处且 appdata.uv 不混入 + `unresolved=1`、空结果面、stdio 握手 `referencesProvider:true` 与 `renameProvider.prepareProvider:true`）；`npx vitest run` 全量 182 passed
+
+## 2026-10-28 09:52 · 任务完成：T-030 rename 核心
+- 任务: T-030 rename 核心：`prepareRename`/`rename`、新名校验、WorkspaceEdit 组装、内置/包内拒绝、存在性校验
+- 结果: 新建 `server/src/rename.ts`——`prepareRename` 返回名字 token Range + 占位符，内置/包内声明返回 `ResponseError(「内置/包内符号不可改名」)`，空结果面返回 null；`rename` 新名校验（`[A-Za-z_][A-Za-z0-9_]*`、HLSL 关键字/内置类型冲突、同作用域占用）违反即错误无 edit；WorkspaceEdit 每处只替换名字 token Range；包内/内置文件 edit 一律不生成；存在性校验（缺失跳过记日志，声明文件缺失→错误）；`#if` 各分支不求值全改；局部符号限函数体。server 声明 `renameProvider:{prepareProvider:true}` 并接两处理器
+- 验证证据: `test/unit/rename.test.ts` T-030 组 8 例绿（跨文件 a.hlsl/b.shader/c.hlsl 五处 edit 逐 Range、作用域 `i.uv`→只改 v2f.uv 声明+使用且 appdata.uv/unknownVar.uv 零改动 + `unresolved=1`、`#if` 两分支四处全改、新名 `1abc`/`float`/空串/占用名四例拒绝、pkg 声明 prepareRename 错误含「不可改名」且 rename 同样拒绝、使用处文件删除后 unresolved 记日志且不在 edit、注释/状态命令 null、Temp null）；全量 vitest 182 passed
+
+## 2026-10-28 09:52 · 任务完成：T-032 零误改回归语料（roadmap M3 核心）
+- 任务: T-032 零误改回归语料（roadmap M3 核心验收）
+- 结果: `test/unit/rename.test.ts` 新增语料 fixture `corpus.shader`：①`#include "uv"` 字符串 ②注释里的 `i.uv` ③未激活 `#if` 分支里另一符号（局部变量 `uv`）的声明与使用 ④`appdata` 与 `v2f` 同名字段——对 `i.uv`（v2f 字段）rename → 仅 `v2f.uv` 声明（5:48）与可解析的 `i.uv`（16:17）被改，其余六处逐 Range 断言不在 edit 集
+- 验证证据: rename.test.ts T-032 组绿（`m.get('corpus.shader:5:48')==='texUV'`、`m.get('corpus.shader:16:17')==='texUV'`，`4:12`/`6:26`/`11:9`/`13:10`/`14:18`/`17:17` 六处 `m.has(...)===false`）；全量 vitest 182 passed
+
+## 2026-10-28 10:22 · 任务完成：T-031 Properties / `sampler_` 联动改名 + 材质/场景资产失效提示
+- 任务: T-031 Properties / `sampler_` 联动改名 + 材质/场景资产失效提示
+- 结果: `rename.ts` property 分支联动 `samplerOccurrences(<旧名>)` → `sampler_<新名>`（Unity 约定名；自定义采样器名不联动），并发 Info 提示（文本含「材质（.mat）」「场景（.unity）」失效迁移指引）；server 接 `notifyInfo → connection.window.showInformationMessage`。资产提示断言走协议级拦截：LSP 请求方法名是 `window/showMessageRequest`、`MessageType` 1=Error/2=Warning/3=Info；测试侧替换 vscode API 不可行（`window.showInformationMessage` 为只读 getter，且 v9 LanguageClient 无 `setupConnection`）
+- 验证证据: `rename.test.ts` T-031 两组绿（vitest：5 处 edit=Properties/TEXTURE2D/SAMPLE 参数/两处 `sampler_BaseMap`，其他属性零改动；真实 stdio：`window/showMessageRequest` type=3 且含「材质」「场景」）；集成用例「T-031：Properties 联动改名（vscode-test 一例）」绿（`vscode.executeDocumentRenameProvider` 5 处 edit）；全量 vitest 183 passed
+
+## 2026-10-28 10:22 · 任务完成：T-033 rename / references 集成用例 + bench
+- 任务: T-033 rename / references 集成用例 + bench（references P95 < 500ms、rename ≤50 处 < 1s）
+- 结果: 新集成模块 `test/src/suite/rename.test.js` 4 例（Properties 联动 vscode-test、编辑后新使用处 rename 立即覆盖、`.hlsl` 第二语言 id references 2 处 + rename 2 处、Temp/compiled-* references 空 + rename 拒绝）；命令名按本机 VS Code 构建实测为 `vscode.executeDocumentRenameProvider`（该构建无 `executePrepareRenameProvider`/`executeRenameProvider`，拒绝时命令抛错）。bench 新增第 5 节：references（真实工程 `_MainTex` 143 处、200 截断）与 rename（真实工程属性 `_FogColor` 3 处，≤50 处预算口径）
+- 验证证据: 集成 23/23 绿（含新 4 例）；`node --expose-gc test/bench/run.mjs` → references 中位数 57.7ms / p95 58.6ms（冷首查 111.3ms，limit 500）、rename 3 处 3 edits（limit 1000）、`bench PASS`
+
+## 2026-10-28 10:26 · 迭代收口：sprint-03（M3）完成
+- 任务: sprint-03 迭代收口（T-021～T-033 全部完成后）
+- 结果: roadmap M3 →（done）四条阶段标准勾选并附任务/日志出处；sprint-03 frontmatter → done；backlog 的 M3 条目全部移除（待办清空，M4 起须先立规格）；status.md 重写（31 项完成、四条命令基线）；根 README 状态行更新；清理真实工程 `D:/Work/Unity/ShaderStudy/Assets` 的诊断残留（`comp2/comp3/comp5.shader` 及 `.meta`）
+- 验证证据: `npm run build` 无错误；`npx vitest run` 183 passed（16 文件）；`npm run test:vscode` 23/23；`node --expose-gc test/bench/run.mjs` → `bench PASS`
+
+## 2026-10-28 11:30 · 重要变更：ADR 0007 fork tree-sitter-hlsl + 手动测试三缺陷修复
+- 任务: 手动测试缺陷修复（图1 `i.` 补全混入文档单词；图2/3 F12 找不到 `UnityObjectToWorldNormal`/`appdata_base`）
+- 结果: ① 诊断：`UnityCG.cginc` 被 tree-sitter-hlsl@0.2.0 解析成整文件级联 ERROR——struct 体内裸宏成员（`UNITY_VERTEX_INPUT_INSTANCE_ID`）使收尾 `};` 变 ERROR 并吞掉整个 `#ifndef` 块，声明从索引消失；审计全 HLSL 语料（205 文件）确认第二根因：跨行宏 `\` 续行体内 `/* */` 块注释截断 `preproc_arg`（UnityPBSLighting/UnityLegacyTextureStack）。② 按 ADR 0007 把上游 fork 为 workspace 包 `hlsl/`（同名 `tree-sitter-hlsl`@0.2.1，npm workspaces 解析），grammar.js 补丁：`_field_declaration_list_item` 挂 `macro_member`（含 conflicts 与 `prec.dynamic(-1)`）+ `preproc_arg` 允许块注释；`tree-sitter generate` + `node-gyp rebuild`（ABI 14）；根脚本 `hlsl:generate/compile/test`。③ 图1 修复：client `contributes.configurationDefaults` 对 `unityshader`/`hlsl` 关闭 `editor.wordBasedSuggestions`（内置单词补全混入成员列表；我们的候选本就来自符号索引）。④ 回归：`hlsl/test/corpus/unity-macros.txt` 2 例；hlsl.test.ts +4 解析用例 +1 索引用例（宏名不混入 struct 字段）；definitionRealProject.test.ts 新增 ②b 工程 `appdata_base`→UnityCG.cginc、②c cginc 内 `UnityObjectToWorldNormal` 同文件跳；completion.test.js 新增 wordBasedSuggestions=off 断言。⑤ 已知限制登记 ADR 0007 后果段并入 backlog T-034：`#if` 块内外不平衡括号（AutoLight.cginc 等）、顶层带 primitive 参数裸宏调用、模板 `$` 占位符、ffx 宏 typedef
+- 验证证据: `node test/bench/diag13.mjs` 修复前后对照（UnityCG.cginc ERROR 1→0，`appdata_base`/`UnityObjectToWorldNormal` 进索引）；`npm run build` 无错误；`npx vitest run` 190 passed（16 文件）；`npm run test:vscode` 全绿（含新 word-based 断言 filter 单跑 ✓）；`npm run bench` → 冷索引 1225ms、F12 p95 5.71ms、补全 p95 1.59ms、references p95 59.9ms、rename 17.29ms、RSS 218MB → `bench PASS`；`npm run hlsl:test` 语料 2/2 ✓
+
+## 2026-10-28 11:55 · 重要变更：feature-completion 规格修订（标识符候选扩展 + 成员可见性分层）
+- 任务: 手动测试缺陷修复第二轮（图1 同名 struct 字段互相污染：`i.` 混入工程内其他文件 v2f 的 color/grabPos/uv 等；图2 自己声明的 `_MainTexture` 不进补全候选）
+- 结果: ① 诊断：成员候选取 `fieldsOfStruct(name)` 是**全工程同名 struct 字段的并集**（ShaderStudy 里 51 个文件各定义各的 `v2f`），标识符候选只放行 macro/function（变量与 Properties 被过滤，原 M3 范围）。② 规格修订（feature-completion 2026-10-28 修订段）：成员候选按可见性分层——当前文件+闭包(≤1)有定义就只用该层，否则包/内置(≥3)，再否则工程(2) 兜底；标识符候选扩展用户全局变量（Variable）、当前文件 Properties 属性（Property）、用户函数（当前文件+闭包）、内置/包内全局变量（`_Time` 类，rank 3/4）；可见性口径统一为「工程内非闭包文件(2) 不可见」（局部变量/参数/关键字仍不做）。③ 实现：`completion.ts` `memberCandidates` 分层过滤 + `identifierCandidates` kind 放行与 rank 规则。④ 回归：completion.test.ts 新增 5 例（同名 v2f 分层、当前文件变量、闭包变量、内置/包内变量、Properties）+ 负例改口径；集成 completion.test.js 新增 1 例（comp6.shader：`_Main`→`_MainTexture`、`i.` 只给 pos/normal 且不含 comp.shader 的 uv 与 comp6_other 的 grabPos/color）
+- 验证证据: `npx vitest run` 195 passed（16 文件，completion 34 例）；`npm run test:vscode` 全绿（25 例，含新集成用例）；`npm run bench` → 补全中位数 1.35ms/p95 1.69ms（预算 150ms）、`bench PASS`
+
+## 2026-10-28 12:45 · 任务完成：T-035 悬停 v1 + T-036 冒号后语义补全（含索引 init_declarator 修复）
+- 任务: 用户手动测试报告「`SV_Target` 等语义无法查找到」。语义是编译器保留字、无任何源码声明，F12 天然无定义 → 经询问用户确认做「悬停文档 + 冒号后补全」成对形态。新规格 [specs/feature-hover.md](../specs/feature-hover.md)（符号悬停=声明行代码块+邻近注释/macroTable 文档；语义悬停=自写 `semanticTable`，未知语义给通用说明）；feature-completion 二次修订（`:` 后语义候选，前缀大小写不敏感）
+- 结果: ① `server/src/semanticTable.ts`（新，自写 ~48 词条：SV_* 系统值 + POSITION/NORMAL/TEXCOORDn 等约定语义，查名大小写不敏感）；② `server/src/hover.ts`（新，复用 definition 的 nodeAtCursor/rankOf/closureOrder；struct 字段 `bitfield_clause` 与函数返回值 `semantics` 两处语义节点识别）；③ `completion.ts` 语义上下文与候选（kind=Keyword，rank 0）；④ `server.ts` 声明 `hoverProvider` + `onHover`；⑤ 顺带修复索引缺陷：`float4 q = expr;` 的**初始化表达式使用标识符**曾被 `declaredNames` 收为 variable 声明（污染 F12/补全/hover），`init_declarator` 只收 `=` 左侧声明名
+- 验证证据: `npx vitest run` 213 passed（17 文件：hover.test.ts 14 例、completion 语义 4 例）；`npm run test:vscode` 全绿（26 例，含「悬停与语义补全」集成用例：SV_Target/SV_POSITION 语义悬停、变量声明行悬停、未声明空结果、`uv : ` 与 `pos : SV_` 补全带文档）；`npm run bench` → 悬停中位数 0.02ms/p95 0.43ms（预算 150ms）、`bench PASS`。T-035/T-036 已从 backlog 移除
+
+## 2026-10-28 13:05 · 重要变更：ADR 0008 死分支灰化——关键字取 Unity Editor.log，呈现走 LSP 扩展通知 + 客户端装饰
+- 结果: 落 ADR 0008（M4 第三条验收的前置选型）。① 关键字源三选一确认取 **Unity 全局 `Editor.log` 的 `Disabled keywords:`**（M4 不依赖 M6 桥）；被否：等 M6 工程元数据桥（灰化被阻塞、roadmap 验收挪期）、对标产品的 `//! KEY:VALUE` 行内注释覆盖语法（要新定义注释语法与优先级，且不解决默认关键字集）、自研预处理器求值/试编译。② 呈现机制确认取 **server 侧基于唯一 CST 的 `preproc_if`/`preproc_elif`/`preproc_else` 求值 + LSP 扩展通知 `$/unityShader/inactiveRegions` + 客户端 `setDecorations`**；被否：`publishDiagnostics` + `DiagnosticTag.Unnecessary`（灰化进 Problems 面板、污染 ADR 0004 与 roadmap 的零误报口径）、semantic tokens（全链路成本最高、与自带 grammar 高亮职责重叠）。③ 界定与 ADR 0002 的张力：**不取代 0002**，「不造私有协议」＝不脱离 LSP 通道与生命周期，`$/…` 属 LSP 允许的扩展；将来若需 LSP 之外的传输须另立 ADR。④ 登记负面与未决：Editor.log 全局非 per-project、可能陈旧、多实例、workspace 外（`didChangeWatchedFiles` 覆盖不到 → 轮询或客户端传入，仍不起独立 watcher 进程）、三平台路径与 `Editor-prev.log` 轮转；**M6 桥是否取代 Editor.log 作权威关键字源**登记为未决项，不预写取代关系。⑤ 落地边界：灰化本体须先 `/project-spec` 立 `feature-dead-branch-dimming`，再 `/project-plan` 拆任务
+- 验证证据: `docs/decisions/0008-dead-branch-dimming-editor-log.md` 落盘（frontmatter `adr: 0008`/`date`/`title`，背景含 D1–D4 与 P1–P3 备选、决策一句话、后果含正负与未决项）；`docs/README.md` ADR 清单与 `docs/decisions/README.md` 已登记；三个选型经 ask_user 逐项由用户确认（均选 Editor.log 为主 / LSP 扩展通知 / 三层组合）；旧 ADR 0001–0007 文件未改动
+
+## 2026-10-28 13:05 · 重要变更：ADR 0009 语法诊断误报控制——grammar 继续修 + ERROR 模式豁免表 + 语料零误报门槛测试
+- 结果: 落 ADR 0009（M4 前两条验收的前置选型；诊断来源已由 ADR 0004 结清，本 ADR 只补「误报怎么控」）。① 事实核对：现有地基只有计数没有按模式判定 —— `countErrorNodes()`（`server/src/parser.ts:118-125`）、`FileIndex.errorCount`（`server/src/symbolIndex.ts:55`）；core 规格仅承诺「错误节点计数暴露给 M4」「解析失败结构化记录供 M4 消费」。② 推论：直接把每个 `ERROR`/`MISSING` 转 Diagnostic 必然在官方语料误报（ADR 0007 三类不可修模式落在 AutoLight.cginc / UnityStandardCore.cginc / ShaderGraph 模板 / ffx 上）→ roadmap「零误报否则不默认开启」永远达不到。③ 三层组合确认：grammar 继续修可修模式（T-034）+ **按 ERROR 模式（node kind + 上下文特征）的豁免表**（仓库内一等公民、数据表 + 解析测试钉住、命中即不产诊断）+ 官方语料离线扫描脚本给出逐模式计数作零误报门槛；被否：只靠 grammar 修（长期默认关闭）、文件/路径级白名单（门槛被掏空）、仅手动触发。④ 接受的代价：豁免表是与 grammar 补丁耦合的第二份知识（每条须带命中计数断言与「不修+理由」）、粒度启发式且默认方向为**宁可漏报不可误报**、门槛测试依赖本机 Unity/PackageCache 需固定快照或经 `unityShader.unityEditorPath` 定位、**T-034 成为语法诊断的前置而非并行项**（排期交 /project-plan）。⑤ 不取代 0001/0004/0007；落地边界：须先 `/project-spec` 立 `feature-syntax-diagnostics`（含 ERROR→Diagnostic 映射/severity/debounce/配置项/只读与生成文件是否产诊断/零误报测法，以及「include 未找到」是否属 M4 —— core 规格已按 M4 消费预留但 roadmap 未列）
+- 验证证据: `docs/decisions/0009-syntax-diagnostics-error-exemption.md` 落盘（背景含 E1–E4 备选与代码事实引用、决策一句话、后果含正负与落地边界）；`docs/README.md` ADR 清单与 `docs/decisions/README.md` 已登记；误报控制策略经 ask_user 由用户确认；`docs/decisions/README.md` 顺带补登记此前缺失的 0007 行；旧 ADR 0001–0007 文件未改动
+
+## 2026-10-28 13:20 · 重要变更：规格 feature-syntax-diagnostics 落盘（M4 语法诊断）
+- 结果: 新规格 [specs/feature-syntax-diagnostics.md](../specs/feature-syntax-diagnostics.md) 落盘，六段齐备。① 四个范围点经 ask_user 逐项确认：**「include 未找到」纳入本规格 severity=Warning**（core 规格 §5 已按「M4 消费」预留，Range 落在 `#include` 路径字符串上）；**四类文件 `.shader/.hlsl/.hlslinc/.cginc` 都产语法诊断**；**编辑中间态走防抖默认 800 ms 可配**（对标 900 ms）；**零误报门槛达标→默认开、未达标→默认关 + 提供手动开启**。② 落地 ADR 0009 三层控制：`ERROR`/`MISSING` → Error（文案自写、形态对齐 `MISSING ;`/`syntax error - <节点>`）、**只报最外层 ERROR**（级联不刷屏，日志 `nested=`）、`errorExemption.ts` 豁免表（键=node kind+父节点+token 模式，带 `reason` 与命中计数，对应 ADR 0007 三类不可修模式与 ShaderGraph `$` 占位符）。③ **roadmap M4「零误报」验收的测法定死**：`test/corpus/diagnosticsGate.mjs` + `npm run gate:diagnostics`，经 `BENCH_PROJECT`/`BENCH_EDITOR` 定位三源语料，断言语法诊断总数=0 并打印逐模式聚合表，语料缺失时 SKIP 而非 PASS；与 T-034 审计脚本共用口径。④ 新增四个扁平配置项 `unityShader.syntaxDiagnostics`/`includeDiagnostics`/`diagnosticsDebounceMs`/`maxDiagnosticsPerFile`（默认值随门槛）。⑤ 关键边界：**降级态不产 include 未找到诊断**（内置/包内路径不可用必然刷屏）、语法诊断不依赖工程发现照常产、`Temp/compiled-*` 不产、单文件默认 200 条截断
+- 验证证据: 文件存在且含 范围/不在范围/约束/异常与边界（13 行场景表）/验收标准（15 条逐条标注 vitest·vscode-test·脚本·bench）/对应模块 六段；`docs/README.md` 规格清单与 `docs/specs/README.md` 已登记（后者顺带补登记此前缺失的 `feature-hover.md` 行）；四个范围点经 ask_user 由用户确认；引用事实核对 `server/src/parser.ts:118-125`、`server/src/includeResolver.ts:15-23`（`IncludeResult`/`IncludeFailureReason`）、`server/src/symbolIndex.ts:55`
+
+## 2026-10-28 13:20 · 重要变更：规格 feature-dead-branch-dimming 落盘（M4 死分支灰化）
+- 结果: 新规格 [specs/feature-dead-branch-dimming.md](../specs/feature-dead-branch-dimming.md) 落盘，六段齐备，跨模块选型全部承接 ADR 0008。① 三个范围点经 ask_user 逐项确认：**刷新 = `didOpen` 读一次 + 定时轮询 mtime（默认 5000 ms，mtime 未变不重读不解析）**；**装饰只灰分支体，不含 `#if`/`#elif`/`#else`/`#endif` 条件行**；**提供 `unityshader.refreshShaderKeywords` 命令 + Output 健康行 `[keywords] source=… disabled=N age=… regions=M`**。② 求值口径：**三态（假/真/未知），只有确定为假才灰**；不在 Disabled 集合的标识符是**未知**而非「启用」；不引入 Unity 关键字默认值表（列入不在范围）；`#elif` 链前面任一分支未知 → 其后全不灰；嵌套外层假 → 只产外层 Range 不重叠。③ 契约：自定义通知 `unityshader/inactiveRegions`（沿用既有 `unityshader/indexProgress` 命名，`server/src/server.ts:187`），payload 带文档 `version`、客户端丢弃过期版本；客户端经 `capabilities.experimental` 声明支持，未声明则 server 不发。④ 日志侧：三平台路径、尾部窗口默认 512 KiB、读失败保留上次集合并记 `stale=true`、日志缺失 → `source=none` 不报错（roadmap M4 第三条降级口径）。⑤ 一致性声明：**只加装饰，不改 F12/补全/Rename 对死分支的处理**（沿用 rename §8「不求值、全分支都算」），并列入回归验收
+- 验证证据: 文件存在且六段齐备（异常与边界 15 行场景表、验收标准 16 条逐条标注 vitest/vscode-test/bench）；`docs/README.md` 与 `docs/specs/README.md` 已登记；三个范围点经 ask_user 由用户确认；通知命名差异已登记在规格范围 §6（ADR 0008 决策段的 `$/unityShader/inactiveRegions` 为 LSP 私有前缀示例写法，实际名以规格为准，属实现细节故不改 ADR 文件）

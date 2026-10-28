@@ -31,13 +31,15 @@ updated: 2026-10-28
   - [x] include 解析覆盖四类：相对路径、`Assets/…`、`Packages/…`、内置 `.cginc`（T-011，log 20:38：`includeResolver.test.ts` 10 例全绿）
   - [x] 冷启动索引（50 工程 shader + 80+ 包内 `.hlsl` + 56 内置 include）耗时 < 3 秒（T-013 实测 2002ms、经 LSP 全链路复测 1402ms，log 20:38 / 22:52；`npm run bench` 复测 1270ms）
 
-## M3 补全与引用：语义补全 + Rename（planned）
+## M3 补全与引用：语义补全 + Rename（done）
 
+- 范围补充：功能规格 [../specs/feature-completion.md](../specs/feature-completion.md) 与 [../specs/feature-rename.md](../specs/feature-rename.md) 已确认（六个范围点经用户 2026-10-28 逐项确认），拆为 T-021～T-033；
+  细粒度验收以规格为准，本节只保留阶段级标准。
 - 验收标准：
-  - [ ] `i.` 在 `v2f i` 上给出该 struct 的字段候选
-  - [ ] `#include "` 给出候选路径（同目录 / `Assets` / `Packages` / `PackageCache` / 内置）
-  - [ ] 已知 Unity 宏（`SAMPLE_TEXTURE2D`、`TEXTURE2D`、`TransformWorldToHClip` 等）可补全并带文档
-  - [ ] Rename 回归语料（含注释、字符串、未激活 `#if` 分支、同名不同作用域字段）零误改
+  - [x] `i.` 在 `v2f i` 上给出该 struct 的字段候选（T-024 vitest + T-027 集成「`i.` 成员补全」，log 09:11 / 09:33）
+  - [x] `#include "` 给出候选路径（同目录 / `Assets` / `Packages` / `PackageCache` / 内置）（T-025 vitest 五层来源 + T-027 集成 PackageCache 路径，log 09:11 / 09:33）
+  - [x] 已知 Unity 宏（`SAMPLE_TEXTURE2D`、`TEXTURE2D`、`TransformWorldToHClip` 等）可补全并带文档（T-023 `preproc_function_def` 入索引 + T-026 文档三级回退，log 08:53 / 09:11）
+  - [x] Rename 回归语料（含注释、字符串、未激活 `#if` 分支、同名不同作用域字段）零误改（T-032 逐处 Range 断言 + T-030 作用域/分支用例，log 09:52）
 
 ## M4 语法诊断与死分支灰化（planned）
 
