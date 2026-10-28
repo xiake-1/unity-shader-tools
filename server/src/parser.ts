@@ -115,13 +115,50 @@ export function walk(node: SyntaxNode, fn: (n: SyntaxNode) => void): void {
   for (const c of node.children) walk(c, fn);
 }
 
+/** 错误节点判定：ERROR 或 MISSING。
+ *  **MISSING 节点的 `type` 是缺失的 token 名（`;`、`}`、`#endif`…），`isMissing` 为 true；
+ *  `type === 'MISSING'` 永远不成立** —— 2026-10-28 T-034 实测修正：此前的写法让 MISSING
+ *  从未被计入，语料里 219 处 `MISSING:;` 因此长期隐形（见 docs/progress/log.md）。 */
+export function isErrorNode(node: SyntaxNode): boolean {
+  return node.type === 'ERROR' || node.isMissing;
+}
+
 /** 统计 ERROR / MISSING 节点（M4 语法诊断与语料健康检查共用） */
 export function countErrorNodes(root: SyntaxNode): number {
   let n = 0;
   walk(root, (node) => {
-    if (node.type === 'ERROR' || node.type === 'MISSING') n++;
+    if (isErrorNode(node)) n++;
   });
   return n;
+}
+
+export interface ErrorNode {
+  node: SyntaxNode;
+  /** 该节点内部被抑制的错误节点数（级联吞块的规模，写进日志 `nested=`） */
+  nested: number;
+}
+
+/** 收集错误节点（T-037）。`outermostOnly = true`（语法诊断口径，ADR 0009）时只返回最外层，
+ *  其内部级联计入 `nested`；`false` 时逐个返回（语料审计口径）。 */
+export function collectErrorNodes(root: SyntaxNode, outermostOnly = true): ErrorNode[] {
+  const out: ErrorNode[] = [];
+  const countInner = (n: SyntaxNode): number => {
+    let c = 0;
+    for (const ch of n.children) {
+      if (isErrorNode(ch)) c++;
+      c += countInner(ch);
+    }
+    return c;
+  };
+  const visit = (n: SyntaxNode): void => {
+    if (isErrorNode(n)) {
+      out.push({ node: n, nested: countInner(n) });
+      if (outermostOnly) return;
+    }
+    for (const c of n.children) visit(c);
+  };
+  visit(root);
+  return out;
 }
 
 export function nodeText(node: SyntaxNode, text: string): string {

@@ -28,19 +28,49 @@ import { provideCompletion } from './completion';
 import { provideHover } from './hover';
 import { provideReferences } from './references';
 import { prepareRename, rename } from './rename';
+import {
+  computeFileDiagnostics,
+  treesForFile,
+  diagnosticLogLine,
+  DEFAULT_MAX_DIAGNOSTICS_PER_FILE,
+} from './diagnostics';
+import { ExemptionTable } from './errorExemption';
+import { UnityKeywordSource, keywordHealthLine } from './unityKeywordSource';
+import { collectInactiveRegions, type InactiveRegion } from './inactiveRegions';
 
 interface Settings {
   trace: 'off' | 'messages' | 'verbose';
   index: boolean;
   maxIndexFileSize: number; // bytes
   unityEditorPath?: string;
+  // M4 语法诊断（规格 feature-syntax-diagnostics 范围 9）
+  syntaxDiagnostics: boolean;
+  includeDiagnostics: boolean;
+  diagnosticsDebounceMs: number;
+  maxDiagnosticsPerFile: number;
+  // M4 死分支灰化（规格 feature-dead-branch-dimming 范围 8/9/11）
+  keywordPollMs: number;
+  keywordLogScanBytes: number;
+  branchDebounceMs: number;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   trace: 'off',
   index: true,
   maxIndexFileSize: 2 * 1024 * 1024,
+  // 默认值与 `npm run gate:diagnostics` 的门槛结果联动（规格范围 7）：
+  // 门槛 PASS（真实语料语法诊断总数 = 0）→ 默认 true；门槛 FAIL → 必须改回 false。
+  syntaxDiagnostics: true,
+  includeDiagnostics: true,
+  diagnosticsDebounceMs: 800,
+  maxDiagnosticsPerFile: DEFAULT_MAX_DIAGNOSTICS_PER_FILE,
+  keywordPollMs: 5000,
+  keywordLogScanBytes: 512 * 1024,
+  branchDebounceMs: 700,
 };
+
+/** 客户端在 `initialize` 的 `capabilities.experimental` 里声明支持时才发通知（规格范围 6） */
+export const INACTIVE_REGIONS_NOTIFICATION = 'unityshader/inactiveRegions';
 
 const SHADER_EXT = /\.(shader|hlsl|hlslinc|cginc)$/i;
 
@@ -154,6 +184,171 @@ export function start(): void {
     }
   };
 
+  // ---- M4 语法诊断发布管线（T-040，规格范围 1/6）----
+  /** 打开文档的 file → uri（publishDiagnostics 要 uri，store 的键是 fs 路径） */
+  const openUris = new Map<string, string>();
+  const diagTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** 发布次数计数器：集成测试据此断言防抖（连续 5 次 didChange 只发 1 次） */
+  let diagPublishes = 0;
+
+  const pathToUri = (p: string): string => {
+    const slash = p.replace(/\\/g, '/');
+    return /^([a-zA-Z]):/.test(slash) ? `file:///${encodeURI(slash)}` : `file://${encodeURI(slash)}`;
+  };
+
+  /** 立即计算并发布（`didOpen`/`didSave`/`didChangeWatchedFiles` 走这里，规格范围 6） */
+  const publishNow = (file: string): void => {
+    if (isGeneratedFile(file)) return; // core §7：生成文件不产任何诊断
+    const state = store.get(file);
+    let text: string | null = state?.text ?? null;
+    if (text === null) {
+      // 未打开的磁盘文件：受索引大小上限约束（规格约束：上限只约束未打开的文件）
+      try {
+        const st = fs.statSync(file);
+        if (st.size > settings.maxIndexFileSize) {
+          log(`diagnostics skipped (oversized, not open): ${file}`);
+          return;
+        }
+        text = fs.readFileSync(file, 'utf8');
+      } catch {
+        return;
+      }
+    }
+    const uri = openUris.get(file) ?? pathToUri(file);
+    if (!settings.syntaxDiagnostics && !settings.includeDiagnostics) {
+      // 两个开关都关：清空旧诊断，不残留（规格异常表）
+      diagPublishes++;
+      connection.sendDiagnostics({ uri, diagnostics: [] });
+      return;
+    }
+    const res = computeFileDiagnostics(treesForFile(file, text), {
+      file,
+      maxPerFile: settings.maxDiagnosticsPerFile,
+      exemptions: new ExemptionTable(),
+      includeCtx: includeCtx(),
+      syntaxDiagnostics: settings.syntaxDiagnostics,
+      includeDiagnostics: settings.includeDiagnostics,
+    });
+    diagPublishes++;
+    connection.sendDiagnostics({ uri, diagnostics: res.diagnostics });
+    log(diagnosticLogLine(file, res.counts));
+  };
+
+  /** didChange 走防抖：窗口内不发布中间态（规格范围 6，默认 800 ms，0 = 即时） */
+  const schedulePublish = (file: string): void => {
+    const delay = Math.max(0, Math.min(5000, settings.diagnosticsDebounceMs));
+    const existing = diagTimers.get(file);
+    if (existing) clearTimeout(existing);
+    if (delay === 0) {
+      diagTimers.delete(file);
+      publishNow(file);
+      return;
+    }
+    diagTimers.set(
+      file,
+      setTimeout(() => {
+        diagTimers.delete(file);
+        publishNow(file);
+      }, delay)
+    );
+  };
+
+  const clearDiagnostics = (file: string, uri?: string): void => {
+    const t = diagTimers.get(file);
+    if (t) {
+      clearTimeout(t);
+      diagTimers.delete(file);
+    }
+    connection.sendDiagnostics({ uri: uri ?? pathToUri(file), diagnostics: [] });
+  };
+
+  // ---- M4 死分支灰化（T-046，规格 feature-dead-branch-dimming；ADR 0008）----
+  // 日志路径按平台推导（规格约束）。测试用 `UNITYSHADER_KEYWORD_LOG` 指向 fixture 日志：
+  // 规格的验收要求「Editor.log 用自包含 fixture」「fixture 指向不存在的日志路径」，
+  // 而公开设置面只有三项（不含路径），故测试注入走环境变量，不进 contributes。
+  const keywordLogOverride = process.env.UNITYSHADER_KEYWORD_LOG ?? undefined;
+  const keywords = new UnityKeywordSource({
+    scanBytes: DEFAULT_SETTINGS.keywordLogScanBytes,
+    logPath: keywordLogOverride ?? null,
+  });
+  let lastHealthLine = '';
+  /** 客户端未在 `capabilities.experimental` 声明支持 → 不发通知（规格异常表：功能静默缺席） */
+  let clientWantsInactive = false;
+  const branchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let disabledKey = '';
+  let lastRegionTotal = 0;
+
+  /** 求值 + 推送单个文档；返回本次 Range 数（健康行用它） */
+  const pushInactive = (file: string): number => {
+    if (!clientWantsInactive || isGeneratedFile(file)) return 0;
+    const uri = openUris.get(file) ?? pathToUri(file);
+    const doc = documents.get(uri);
+    const text = doc?.getText() ?? store.get(file)?.text;
+    if (text === undefined) return 0;
+    const regions: InactiveRegion[] = [];
+    for (const t of treesForFile(file, text)) {
+      if (t.kind !== 'hlsl') continue; // ShaderLab 外壳没有预处理器（规格异常表）
+      regions.push(...collectInactiveRegions(t.tree.rootNode, text, { disabled: keywords.current.set }));
+    }
+    connection.sendNotification(INACTIVE_REGIONS_NOTIFICATION, {
+      uri,
+      version: doc?.version ?? 0,
+      regions,
+    });
+    lastRegionTotal = regions.length;
+    return regions.length;
+  };
+
+  const pushAllInactive = (): number => {
+    let total = 0;
+    for (const f of openUris.keys()) total += pushInactive(f);
+    return total;
+  };
+
+  /** 重读日志（mtime 未变则不重读）；集合变化 → 对已打开文档重算并推送（规格范围 8） */
+  const refreshKeywords = (force: boolean, logPathOverride?: string | null): void => {
+    if (logPathOverride !== undefined) keywords.setLogPath(logPathOverride);
+    keywords.setScanBytes(settings.keywordLogScanBytes);
+    const snap = keywords.refresh(force);
+    const key = [...snap.set].sort().join(' ');
+    if (key !== disabledKey) {
+      disabledKey = key;
+      pushAllInactive();
+    }
+    lastHealthLine = keywordHealthLine(snap, lastRegionTotal);
+    log(lastHealthLine);
+  };
+
+  /** `didChange` 防抖（默认 700 ms，独立于语法诊断，规格范围 11） */
+  const scheduleInactive = (file: string): void => {
+    if (!clientWantsInactive) return;
+    const delay = Math.max(0, Math.min(5000, settings.branchDebounceMs));
+    const existing = branchTimers.get(file);
+    if (existing) clearTimeout(existing);
+    if (delay === 0) {
+      branchTimers.delete(file);
+      pushInactive(file);
+      return;
+    }
+    branchTimers.set(
+      file,
+      setTimeout(() => {
+        branchTimers.delete(file);
+        pushInactive(file);
+      }, delay)
+    );
+  };
+
+  const startKeywordPolling = (): void => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    if (settings.keywordPollMs <= 0) return; // 0 = 关闭轮询（规格范围 8）
+    pollTimer = setInterval(() => refreshKeywords(false), Math.max(1000, settings.keywordPollMs));
+  };
+
   const notifyDegraded = (): void => {
     if (degradeNotified || env.degradedReasons.length === 0) return;
     degradeNotified = true;
@@ -209,6 +404,9 @@ export function start(): void {
       settings?: Partial<Settings>;
     };
     if (initOpts.settings) settings = { ...DEFAULT_SETTINGS, ...initOpts.settings };
+    // 灰化通知只在客户端声明支持时发（规格范围 6：capabilities.experimental 协商）
+    const exp = (params.capabilities?.experimental ?? {}) as Record<string, unknown>;
+    clientWantsInactive = exp[INACTIVE_REGIONS_NOTIFICATION] === true;
     const initFile = initOpts.activeFile ? uriToFsPath(String(initOpts.activeFile)) : null;
     env = discoverUnityEnvironment(initFile, workspaceFolders, {
       configuredEditorPath: settings.unityEditorPath,
@@ -236,6 +434,8 @@ export function start(): void {
           // LSP 3.17 的静态 watched-files 能力在 workspace 下，类型定义未覆盖
           didChangeWatchedFiles: { dynamicRegistration: false },
         },
+        // 灰化走 LSP 扩展通知（ADR 0008）：这里宣告服务端支持，客户端在 initialize 里宣告它支持
+        experimental: { [INACTIVE_REGIONS_NOTIFICATION]: true },
       } as InitializeResult['capabilities'],
     };
   });
@@ -244,12 +444,24 @@ export function start(): void {
     // 文件监听由客户端 synchronize.fileEvents 建立并转发 didChangeWatchedFiles；
     // 服务端只声明静态能力，不做动态注册（少一层注册失败风险）
     runBackgroundIndex();
+    // 灰化：启动时读一次日志并起轮询（mtime 未变不重读，规格范围 8）
+    refreshKeywords(true);
+    startKeywordPolling();
   });
 
   connection.onDidChangeConfiguration((change) => {
     const next = (change.settings?.unityShader ?? {}) as Partial<Settings>;
     settings = { ...DEFAULT_SETTINGS, ...next };
-    log(`settings updated: index=${settings.index} maxFile=${settings.maxIndexFileSize}`);
+    log(
+      `settings updated: index=${settings.index} maxFile=${settings.maxIndexFileSize} ` +
+        `syntax=${settings.syntaxDiagnostics} include=${settings.includeDiagnostics} ` +
+        `debounce=${settings.diagnosticsDebounceMs} maxDiag=${settings.maxDiagnosticsPerFile}`
+    );
+    // 开关变化立即重发：关掉语法诊断时旧诊断必须清空，不残留（规格异常表）
+    for (const file of openUris.keys()) publishNow(file);
+    // 灰化相关设置（轮询间隔 / 窗口 / 防抖）即时生效
+    startKeywordPolling();
+    refreshKeywords(true);
   });
 
   documents.onDidOpen((e) => {
@@ -260,6 +472,10 @@ export function start(): void {
     }
     store.open(file, e.document.getText());
     reindexFile(file, e.document.getText());
+    openUris.set(file, e.document.uri);
+    publishNow(file); // didOpen 立即发布（规格范围 6）
+    keywords.refresh(); // didOpen 读一次关键字（规格范围 8）
+    pushInactive(file);
   });
 
   // TextDocuments 先 listen：它注册默认的 didChange 处理；
@@ -270,10 +486,28 @@ export function start(): void {
     const file = uriToFsPath(params.textDocument.uri);
     const state = store.change(file, params.contentChanges as never);
     if (state && !state.generated) reindexFile(file, state.text);
+    schedulePublish(file); // 防抖窗口内不发布中间态（规格范围 6）
+    scheduleInactive(file); // 灰化独立防抖（规格范围 11）
+  });
+
+  documents.onDidSave((e) => {
+    const file = uriToFsPath(e.document.uri);
+    if (!store.isGenerated(file)) {
+      publishNow(file); // didSave 立即发布
+      pushInactive(file); // 灰化同样立即重算
+    }
   });
 
   documents.onDidClose((e) => {
-    store.close(uriToFsPath(e.document.uri));
+    const file = uriToFsPath(e.document.uri);
+    clearDiagnostics(file, e.document.uri); // didClose 清空该文件诊断（规格范围 6）
+    const bt = branchTimers.get(file);
+    if (bt) {
+      clearTimeout(bt);
+      branchTimers.delete(file);
+    }
+    store.close(file);
+    openUris.delete(file);
   });
 
   connection.onDidChangeWatchedFiles(({ changes }) => {
@@ -282,13 +516,16 @@ export function start(): void {
       if (isGeneratedFile(file)) continue;
       if (c.type === 3 /* Deleted */) {
         index.removeFile(file);
+        clearDiagnostics(file);
         store.close(file);
+        openUris.delete(file);
       } else {
         try {
           reindexFile(file, fs.readFileSync(file, 'utf8'));
         } catch {
           index.removeFile(file);
         }
+        publishNow(file); // 外部修改（git 切分支等）驱动重算（规格异常表）
       }
     }
   });
@@ -431,6 +668,18 @@ export function start(): void {
       }, 10);
       return null;
     }
+    if (params.command === 'unityshader/refreshKeywords') {
+      // 客户端命令 unityshader.refreshShaderKeywords 的实现：强制重读日志 + 重算 + 推送。
+      // 可选参数 { logPath } 只给集成测试用（指向 fixture 日志或不存在的日志）。
+      const args = (params.arguments ?? []) as { logPath?: string | null }[];
+      const override = args[0] && 'logPath' in args[0] ? args[0].logPath : undefined;
+      refreshKeywords(true, override);
+      return {
+        disabled: keywords.current.disabled,
+        regions: lastRegionTotal,
+        health: lastHealthLine,
+      };
+    }
     if (params.command === 'unityshader/__indexStats') {
       return {
         pid: process.pid, // 集成测试据此断言进程身份与重启
@@ -439,6 +688,22 @@ export function start(): void {
         indexing, // 集成测试据此等待首轮扫描完成（补全候选依赖包内符号）
         degraded: env.degradedReasons,
         includeRoots: includeCtx(),
+        // M4：集成测试据此断言防抖与开关行为
+        diagnosticsPublished: diagPublishes,
+        diagnosticsSettings: {
+          syntax: settings.syntaxDiagnostics,
+          include: settings.includeDiagnostics,
+          debounceMs: settings.diagnosticsDebounceMs,
+        },
+        // M4 灰化：集成测试据此断言协商结果与关键字状态
+        inactiveRegions: {
+          clientWants: clientWantsInactive,
+          source: keywords.current.source,
+          disabled: keywords.current.disabled.length,
+          regions: lastRegionTotal,
+          pollMs: settings.keywordPollMs,
+          health: lastHealthLine,
+        },
       };
     }
     return null;

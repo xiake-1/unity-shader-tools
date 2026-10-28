@@ -7,6 +7,8 @@ async function run() {
     require('./definition.test.js'),
     require('./completion.test.js'),
     require('./rename.test.js'),
+    require('./diagnostics.test.js'),
+    require('./deadBranch.test.js'),
     require('./extension.test.js'),
   ];
   // 只跑名字包含该子串的用例（崩溃用例很慢，迭代时用它过滤）

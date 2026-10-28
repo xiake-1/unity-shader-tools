@@ -16,6 +16,8 @@
     "test:vscode": "node test/src/runTest.js",
     "vscode:playground": "node test/src/playground.js",
     "bench": "node test/bench/run.mjs",
+    "audit:errors": "node test/corpus/errorAudit.mjs",
+    "gate:diagnostics": "node test/corpus/diagnosticsGate.mjs",
     "grammar:generate": "npm run generate -w grammar",
     "grammar:test": "npm run test -w grammar",
     "hlsl:generate": "npm run generate -w hlsl",

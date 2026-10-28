@@ -91,6 +91,9 @@ export function activate(context: vscode.ExtensionContext): void {
       fileEvents: vscode.workspace.createFileSystemWatcher(
         '**/*.{shader,hlsl,hlslinc,cginc}'
       ),
+      // 让 VS Code 把 unityShader 这一节的当前值推给 server（workspace/didChangeConfiguration），
+      // 否则 server 收到的 change.settings 是空对象，开关一改不生效。
+      configurationSection: 'unityShader',
     },
     initializationOptions: {
       activeFile: activeFileUri(),
@@ -99,6 +102,15 @@ export function activate(context: vscode.ExtensionContext): void {
         index: settings.get<boolean>('index', true),
         maxIndexFileSize: settings.get<number>('maxIndexFileSize', 2 * 1024 * 1024),
         unityEditorPath: settings.get<string>('unityEditorPath', ''),
+        // M4 语法诊断（默认值来自 contributes.configurationDefaults，与门槛测试联动）
+        syntaxDiagnostics: settings.get<boolean>('syntaxDiagnostics', true),
+        includeDiagnostics: settings.get<boolean>('includeDiagnostics', true),
+        diagnosticsDebounceMs: settings.get<number>('diagnosticsDebounceMs', 800),
+        maxDiagnosticsPerFile: settings.get<number>('maxDiagnosticsPerFile', 200),
+        // M4 死分支灰化（规格 feature-dead-branch-dimming 范围 8/9/11）
+        keywordPollMs: settings.get<number>('keywordPollMs', 5000),
+        keywordLogScanBytes: settings.get<number>('keywordLogScanBytes', 512 * 1024),
+        branchDebounceMs: settings.get<number>('branchDebounceMs', 700),
       },
     },
     // v9 要的是 ErrorHandler 实例（不是工厂）：传函数会让 closed() 变成 undefined，
@@ -113,6 +125,25 @@ export function activate(context: vscode.ExtensionContext): void {
     serverOptions,
     clientOptions
   );
+
+  // 灰化协商（规格 feature-dead-branch-dimming 范围 6）：客户端在 initialize 的
+  // `capabilities.experimental['unityshader/inactiveRegions'] = true` 声明支持，server 才发通知。
+  // vscode-languageclient v9 没有公开注入口：ClientOptions 无 capabilities 字段，
+  // Middleware 也没有 initialize 钩子（v9 的 initialize 直连 connection，不过中间件）。
+  // 因此覆盖实例方法 computeClientCapabilities —— 属实现细节，升级 v10 时要复查；
+  // 集成用例「灰化协商」会在第一时间发现它失效。
+  const capsHost = client as unknown as {
+    computeClientCapabilities?: () => Record<string, unknown>;
+  };
+  const baseCaps = capsHost.computeClientCapabilities?.bind(client);
+  capsHost.computeClientCapabilities = () => {
+    const caps = baseCaps ? baseCaps() : {};
+    caps.experimental = {
+      ...((caps.experimental as Record<string, unknown> | undefined) ?? {}),
+      'unityshader/inactiveRegions': true,
+    };
+    return caps;
+  };
 
   // 把 client 的输出通道镜像到 trace 文件：内部重启失败只写通道，不镜像就看不到原因
   const channel = (client as unknown as {
@@ -136,6 +167,114 @@ export function activate(context: vscode.ExtensionContext): void {
     lastState = String(e.newState);
     trace(`state ${String(e.oldState)} -> ${String(e.newState)}`);
   });
+
+  // ---- M4 死分支灰化（T-047，规格 feature-dead-branch-dimming 范围 7/9）----
+  interface RegionPayload {
+    uri: string;
+    version: number;
+    regions: { start: { line: number; character: number }; end: { line: number; character: number }; condition: string }[];
+  }
+  /** uri → 最近一次推送（带 version，编辑后旧 Range 不得套到新文本上） */
+  const regionStore = new Map<string, { version: number; regions: RegionPayload['regions'] }>();
+  let lastAppliedCount = 0;
+
+  // 颜色取主题的 `disabledForeground`（对标产品硬编码 grey，不照抄）；
+  // 该色在多数主题里不存在，故同时给 `opacity` 兜底——两者是独立的渲染属性，
+  // 主题有色时用它，没色时 opacity 仍然生效（规格范围 7「取不到时回退」）。
+  const dimType = vscode.window.createTextEditorDecorationType({
+    color: new vscode.ThemeColor('disabledForeground'),
+    opacity: '0.45',
+  });
+
+  const applyDecorations = (editor: vscode.TextEditor | undefined): void => {
+    if (!editor) {
+      lastAppliedCount = 0;
+      return;
+    }
+    const entry = regionStore.get(editor.document.uri.toString());
+    if (!entry || entry.version !== editor.document.version) {
+      // 版本不匹配（编辑后旧推送）→ 不套装饰（规格约束）
+      editor.setDecorations(dimType, []);
+      lastAppliedCount = 0;
+      return;
+    }
+    editor.setDecorations(
+      dimType,
+      entry.regions.map(
+        (r) => new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character)
+      )
+    );
+    lastAppliedCount = entry.regions.length;
+  };
+
+  let lastActiveEditor: vscode.TextEditor | undefined;
+  const onActiveEditor = (editor: vscode.TextEditor | undefined): void => {
+    // 装饰只作用于活动编辑器：切走的编辑器清空（规格范围 7）
+    if (lastActiveEditor && lastActiveEditor !== editor) lastActiveEditor.setDecorations(dimType, []);
+    lastActiveEditor = editor;
+    applyDecorations(editor);
+  };
+
+  client.onNotification('unityshader/inactiveRegions', (payload: RegionPayload) => {
+    if (!payload || typeof payload.uri !== 'string') return;
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === payload.uri);
+    if (doc && doc.version !== payload.version) {
+      regionStore.delete(payload.uri); // 过期推送：丢弃，不产生装饰（规格异常表）
+      if (lastActiveEditor && lastActiveEditor.document.uri.toString() === payload.uri) {
+        lastActiveEditor.setDecorations(dimType, []);
+        lastAppliedCount = 0;
+      }
+      return;
+    }
+    regionStore.set(payload.uri, { version: payload.version, regions: payload.regions ?? [] });
+    if (lastActiveEditor && lastActiveEditor.document.uri.toString() === payload.uri) {
+      applyDecorations(lastActiveEditor);
+    }
+  });
+
+  context.subscriptions.push(
+    dimType,
+    vscode.window.onDidChangeActiveTextEditor(onActiveEditor),
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      regionStore.delete(doc.uri.toString()); // didClose 清理（规格范围 7）
+    }),
+    vscode.commands.registerCommand('unityshader.refreshShaderKeywords', async () => {
+      if (!client) return null;
+      const r = (await client.sendRequest('workspace/executeCommand', {
+        command: 'unityshader/refreshKeywords',
+      })) as { disabled?: number; regions?: number } | null;
+      void vscode.window.showInformationMessage(
+        `Unity Shader: 已重读 Unity 关键字（disabled=${r?.disabled ?? 0}，死分支 ${r?.regions ?? 0} 处）`
+      );
+      return r;
+    }),
+    // 测试钩子：当前活动编辑器上的灰化 Range 数（集成测试断言装饰落地）
+    vscode.commands.registerCommand('unityshader/__testInactiveDecorations', () => ({
+      editor: lastActiveEditor?.document.uri.toString() ?? null,
+      version: lastActiveEditor?.document.version ?? null,
+      stored: lastActiveEditor ? (regionStore.get(lastActiveEditor.document.uri.toString())?.regions.length ?? 0) : 0,
+      applied: lastAppliedCount,
+      totalStored: regionStore.size,
+      conditions: lastActiveEditor
+        ? (regionStore.get(lastActiveEditor.document.uri.toString())?.regions ?? []).map((r) => r.condition)
+        : [],
+      ranges: lastActiveEditor
+        ? (regionStore.get(lastActiveEditor.document.uri.toString())?.regions ?? []).map((r) => ({
+            start: r.start,
+            end: r.end,
+          }))
+        : [],
+    })),
+    // 测试钩子：带参数转发到 server 的 unityshader/refreshKeywords（可指定 fixture 日志路径）
+    vscode.commands.registerCommand('unityshader/__testRefreshKeywords', async (args?: { logPath?: string | null }) => {
+      if (!client) return null;
+      return client.sendRequest('workspace/executeCommand', {
+        command: 'unityshader/refreshKeywords',
+        arguments: [args ?? {}],
+      });
+    })
+  );
+  onActiveEditor(vscode.window.activeTextEditor);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('unityshader.showIndexStats', async () => {
