@@ -2,7 +2,7 @@
 
 > 给 Unity 开发者用的 VSCode 插件：为 `.shader` / `.hlsl` 提供转到定义、语义补全、重命名、语法与类型诊断。工作名，可改。
 
-**当前状态**：M1 地基与 M2 转到定义已完成（F12 覆盖工程内 / 包内 / 引擎内置符号），M3 待立规格（详见 [docs/progress/status.md](docs/progress/status.md)）
+**当前状态**：M1 地基、M2 转到定义、M3 语义补全与引用/Rename 均已完成（补全带文档、Rename 零误改回归语料全绿），M4 起待立规格（详见 [docs/progress/status.md](docs/progress/status.md)）
 
 ## Agent 工作规则（必读）
 
