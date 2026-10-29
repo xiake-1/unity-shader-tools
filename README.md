@@ -2,10 +2,10 @@
 
 > 给 Unity 开发者用的 VSCode 插件：为 `.shader` / `.hlsl` 提供转到定义、语义补全、重命名、语法与类型诊断。工作名，可改。
 
-**当前状态**：M1 地基、M2 转到定义、M3 语义补全与引用/Rename、悬停、**M4 语法诊断与 `#if` 死分支灰化**、
-**M5 类型诊断（DXC）**、**M5 格式化（自写 CST 打印器）**、**M5 发布流水线（prebuild + CI 矩阵 + vsce）**
-全部完成（T-001～T-067，backlog 无待办）；实测 vsix 23.67 MB、三项门槛全 PASS（详见 [docs/progress/status.md](docs/progress/status.md)）。
-**下一步 M6 Unity 包侧**：按规范须先写规格再拆任务。
+**当前状态**：M1～M5（T-001～T-067）与 **M6 插件端（T-068～T-073）** 全部完成，backlog 无待办；
+实测 vsix 23.67 MB、四门槛（语法 / 类型 / 格式化 / 变体）全 PASS（2026-10-29 复跑，详见
+[docs/progress/status.md](docs/progress/status.md)）。M6 的 Unity 包侧已移出范围（ADR 0014），
+插件端对 Unity 工程只读不写。
 
 ## Agent 工作规则（必读）
 
