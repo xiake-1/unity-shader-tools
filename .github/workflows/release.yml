@@ -89,8 +89,11 @@ jobs:
         run: node scripts/merge-prebuilds.mjs .ci-prebuilds
       # dxc：ADR 0010 定「随扩展附带官方预编译」，win/linux 两档由脚本拉取并校验版本
       - run: npm run dxc:fetch
-      # 冒烟：附带产物必须真能跑（lspServer 单测里「类型诊断不可用」弹窗的取证点）
+      # 冒烟：附带产物必须真能跑。官方 Linux dxc 无 rpath，server spawn 时注入 LD_LIBRARY_PATH
+      # （dxcRunner.dxcSpawnEnv）——冒烟按同口径跑，取证点从「产物在」升级为「产物可加载」
       - name: dxc 冒烟（linux-x64 附带产物可执行）
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/dxc/linux-x64
         run: |
           ./third_party/dxc/linux-x64/dxc --version || { echo '--- ldd ---'; ldd ./third_party/dxc/linux-x64/dxc; exit 1; }
         shell: bash

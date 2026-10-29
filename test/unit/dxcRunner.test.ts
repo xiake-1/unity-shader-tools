@@ -13,14 +13,17 @@ import {
   dxcHealthLine,
   dxcPlatformDir,
   dxcSearchRoots,
+  dxcSpawnEnv,
   parseDxcVersion,
   probeDxc,
   resolveDxc,
 } from '../../server/src/dxcRunner';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const BUNDLED_EXE = path.join(REPO_ROOT, 'third_party', 'dxc', 'win32-x64', 'dxc.exe');
-const hasBundled = fs.existsSync(BUNDLED_EXE);
+// 附带产物按**当前平台**定位（曾硬编码 win32-x64 → Linux CI 上探活用例全被静默跳过）
+const platDir = dxcPlatformDir();
+const BUNDLED_EXE = platDir ? path.join(REPO_ROOT, 'third_party', 'dxc', platDir, dxcExecutableName()) : '';
+const hasBundled = BUNDLED_EXE !== '' && fs.existsSync(BUNDLED_EXE);
 
 let dir = '';
 beforeEach(() => {
@@ -37,6 +40,17 @@ function fakeTree(platformDir: string, files: string[]): string {
   for (const f of files) fs.writeFileSync(path.join(d, f), '');
   return home;
 }
+
+describe('dxcSpawnEnv（Linux 附带产物的共享库路径，CI 冒烟实测根因）', () => {
+  it('linux → LD_LIBRARY_PATH 指向 exe 所在目录（官方 dxc 无 rpath）', () => {
+    const env = dxcSpawnEnv('/opt/ext/third_party/dxc/linux-x64/dxc', 'linux');
+    expect(env.LD_LIBRARY_PATH).toContain(path.resolve('/opt/ext/third_party/dxc/linux-x64'));
+  });
+  it('win32 / darwin → 原样返回 process.env（无操作）', () => {
+    expect(dxcSpawnEnv('C:\\x\\dxc.exe', 'win32')).toBe(process.env);
+    expect(dxcSpawnEnv('/a/dxc', 'darwin')).toBe(process.env);
+  });
+});
 
 describe('平台矩阵（ADR 0010：官方只有 win/linux 产物）', () => {
   it('win32-x64 / win32-arm64 / linux-x64 有产物目录', () => {

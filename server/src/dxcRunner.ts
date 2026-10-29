@@ -165,10 +165,20 @@ export type DxcProbe =
   | { ok: true; version: string | null; stdout: string }
   | { ok: false; reason: 'spawn-failed' | 'timeout'; detail: string };
 
+/** Linux：官方 dxc 二进制没有 rpath（`$ORIGIN`），同目录的 `libdxcompiler.so` / `libdxil.so`
+ *  加载器找不到（CI 冒烟实测 `error while loading shared libraries: libdxcompiler.so`）。
+ *  spawn 时把 LD_LIBRARY_PATH 指到产物目录；win/mac 原样返回（无操作）。 */
+export function dxcSpawnEnv(exePath: string, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+  if (platform !== 'linux') return process.env;
+  const dir = path.dirname(path.resolve(exePath));
+  const prev = process.env.LD_LIBRARY_PATH;
+  return { ...process.env, LD_LIBRARY_PATH: prev ? `${dir}:${prev}` : dir };
+}
+
 /** 跑一次 `--version`：证明产物可加载（dll 缺失/损坏在这里暴露），并取版本号。 */
 export function probeDxc(exePath: string, timeoutMs = 5000): Promise<DxcProbe> {
   return new Promise((resolve) => {
-    execFile(exePath, ['--version'], { timeout: timeoutMs, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(exePath, ['--version'], { timeout: timeoutMs, windowsHide: true, env: dxcSpawnEnv(exePath) }, (err, stdout, stderr) => {
       const text = `${stdout ?? ''}\n${stderr ?? ''}`;
       if (err && (err as { killed?: boolean }).killed) {
         resolve({ ok: false, reason: 'timeout', detail: `--version 超时（${timeoutMs} ms）` });
@@ -364,7 +374,7 @@ export async function compileUnit(opts: CompileOptions): Promise<CompileResult> 
     execFile(
       opts.exePath,
       args,
-      { timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true, cwd: tmpDir, signal },
+      { timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true, cwd: tmpDir, signal, env: dxcSpawnEnv(opts.exePath, platform) },
       (err, stdout, stderr) => {
         const e = err as (Error & { killed?: boolean; code?: unknown }) | null;
         // 进程正常退出但退出码非零 → e.code 是数字；spawn 层失败（ENOENT/EACCES…）→ e.code 是字符串
