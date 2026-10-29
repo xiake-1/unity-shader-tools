@@ -68,7 +68,8 @@ describe('Disabled 只做减法（ADR 0008 / 0010）', () => {
 });
 
 describe('真实 DXC：宏决定分支是否被编译（附带产物缺失则跳过）', () => {
-  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: 'win32', arch: 'x64' });
+  // 按当前平台定位（CI fetch --all 后 Linux 上也有 win32 产物，硬编码会 exec PE → crash）
+  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: process.platform, arch: process.arch });
   const skip = !res.ok;
   const src = '#if SHADER_API_D3D11\nfloat4 f() { float4 c = float3(1,1,1); return c; }\n#endif\n';
 

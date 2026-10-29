@@ -150,7 +150,9 @@ describe('T-051 参数与输出解析（纯逻辑）', () => {
 });
 
 describe('T-051 真实编译（附带 dxc，缺失则跳过）', () => {
-  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: 'win32', arch: 'x64' });
+  // 按**当前平台**定位：CI package 档 fetch --all 后 win32 产物也在 Linux 机器上，
+  // 硬编码 win32 会让 Linux 去 exec PE → crash（2026-10-29 CI 实测）
+  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: process.platform, arch: process.arch });
   const skip = !res.ok;
 
   it('合法 HLSL 库编译 → status=ok、零 issue', async () => {
@@ -192,7 +194,7 @@ describe('T-051 真实编译（附带 dxc，缺失则跳过）', () => {
 /* ---------------- T-068：swizzle 的正例与负例（规格验收「非法 swizzle」） ---------------- */
 
 describe('T-068 swizzle 诊断（真机 dxc + 真实 include 根）', () => {
-  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: 'win32', arch: 'x64' });
+  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: process.platform, arch: process.arch });
   const skip = !res.ok;
 
   // includeCtx 必须是**真实存在的目录**：传 null 会走 `degraded=skip-type-diag`，整块不产诊断
@@ -233,7 +235,7 @@ describe('T-068 swizzle 诊断（真机 dxc + 真实 include 根）', () => {
     return provider.run(docFile, text, {
       version: 1,
       syntaxErrorCount: 0,
-      dxc: { ok: true, path: (res as { path: string }).path, dir: path.dirname((res as { path: string }).path), source: 'bundled', platformDir: 'win32-x64' },
+      dxc: { ok: true, path: (res as { path: string }).path, dir: path.dirname((res as { path: string }).path), source: 'bundled', platformDir: (res as { platformDir: string }).platformDir },
       includeCtx: CTX,
       tree: parseShaderLab(text),
     });
