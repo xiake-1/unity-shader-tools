@@ -87,11 +87,31 @@ async function fetchOne(platform) {
     await download(`${BASE}/${spec.file}`, archive);
     const ex = path.join(tmp, 'ex');
     fs.mkdirSync(ex);
-    // zip 解包按平台分派：Windows 的 tar 是 bsdtar（能解 zip），Linux/macOS 的 GNU tar 不能
-    // （CI 实测 `tar: This does not look like a tar archive`）→ 非 win 用 unzip。
+    // zip 解包按平台分派：Windows 的 tar 是 bsdtar（能解 zip）；Linux 的 GNU tar 不能解 zip，
+    // 而官方 zip 用**反斜杠**做路径分隔（`unzip` 直接报错，CI 实测）→ 非 win 用 python3 zipfile
+    // 解包并把 `\` 规范成 `/`（python3 在 ubuntu/macOS runner 预装）。
     if (spec.kind === 'zip') {
-      if (process.platform === 'win32') execFileSync('tar', ['-xf', archive, '-C', ex], { stdio: 'inherit' });
-      else execFileSync('unzip', ['-q', archive, '-d', ex], { stdio: 'inherit' });
+      if (process.platform === 'win32') {
+        execFileSync('tar', ['-xf', archive, '-C', ex], { stdio: 'inherit' });
+      } else {
+        execFileSync(
+          'python3',
+          [
+            '-c',
+            'import sys,zipfile,os\n' +
+              'zf=zipfile.ZipFile(sys.argv[1]); dest=sys.argv[2]\n' +
+              'for n in zf.namelist():\n' +
+              '  fixed=n.replace("\\\\","/")\n' +
+              '  if not fixed or fixed.endswith("/"): continue\n' +
+              '  out=os.path.join(dest,fixed)\n' +
+              '  os.makedirs(os.path.dirname(out),exist_ok=True)\n' +
+              '  open(out,"wb").write(zf.read(n))\n',
+            archive,
+            ex,
+          ],
+          { stdio: 'inherit' }
+        );
+      }
     } else {
       execFileSync('tar', ['-xzf', archive, '-C', ex], { stdio: 'inherit' });
     }
