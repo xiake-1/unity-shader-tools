@@ -10,7 +10,8 @@
  *   node scripts/fetch-dxc.mjs --all       # 官方有产物的全部平台（发布用）
  *   node scripts/fetch-dxc.mjs --platform linux-x64
  *
- * 依赖：系统 `tar`（Windows 10+ 自带 bsdtar，能解 zip；Linux/macOS 自带 GNU tar）。
+ * 依赖：Windows 10+ 自带 bsdtar（`tar` 能解 zip）；Linux/macOS 用 `tar` 解 tar.gz、`unzip` 解 zip
+ * （GNU tar 不能解 zip，CI 实测）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -86,7 +87,14 @@ async function fetchOne(platform) {
     await download(`${BASE}/${spec.file}`, archive);
     const ex = path.join(tmp, 'ex');
     fs.mkdirSync(ex);
-    execFileSync('tar', spec.kind === 'zip' ? ['-xf', archive, '-C', ex] : ['-xzf', archive, '-C', ex], { stdio: 'inherit' });
+    // zip 解包按平台分派：Windows 的 tar 是 bsdtar（能解 zip），Linux/macOS 的 GNU tar 不能
+    // （CI 实测 `tar: This does not look like a tar archive`）→ 非 win 用 unzip。
+    if (spec.kind === 'zip') {
+      if (process.platform === 'win32') execFileSync('tar', ['-xf', archive, '-C', ex], { stdio: 'inherit' });
+      else execFileSync('unzip', ['-q', archive, '-d', ex], { stdio: 'inherit' });
+    } else {
+      execFileSync('tar', ['-xzf', archive, '-C', ex], { stdio: 'inherit' });
+    }
 
     const picked = walk(ex).filter(spec.pick);
     if (picked.length === 0) throw new Error(`产物里没匹配到任何文件（${spec.file}），上游布局可能变了`);
