@@ -73,7 +73,10 @@ async function fetchOne(platform) {
   }
   const outDir = path.join(dest, platform);
   const marker = path.join(outDir, 'VERSION');
-  if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8').trim() === DXC_VERSION) {
+  // 「见标记即跳过」必须同时验证主二进制存在——VERSION 误入库 / 产物被单独清掉时，
+  // 只认标记会静默产出一个没有 dxc 的发布物（CI 2026-10-29 实测踩过）。
+  const mainBin = path.join(outDir, platform.startsWith('win32') ? 'dxc.exe' : 'dxc');
+  if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8').trim() === DXC_VERSION && fs.existsSync(mainBin)) {
     process.stdout.write(`${platform}: 已是 ${DXC_VERSION}，跳过\n`);
     return;
   }

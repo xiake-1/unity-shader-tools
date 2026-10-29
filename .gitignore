@@ -5,10 +5,13 @@ build/
 *.vsix
 grammar/src/parser.c
 hlsl/src/parser.c
-# DXC 预编译产物：由 `npm run dxc:fetch` 取（ADR 0010），与 parser.c 同构——下载物不入库，许可证与 VERSION 标记入库
+# DXC 预编译产物：由 `npm run dxc:fetch` 取（ADR 0010），与 parser.c 同构——下载物不入库，许可证入库。
+# **VERSION 标记绝不入库**：fetch「见标记即跳过」，标记在而产物不在 = fresh checkout 静默无 dxc
+# （CI 曾因此整个 package 档没有 dxc，2026-10-29 log 有取证）。
 third_party/dxc/**/*.exe
 third_party/dxc/**/*.dll
 third_party/dxc/**/*.so
+third_party/dxc/**/VERSION
 # MSVC 链接中间产物（binding.gyp 只从 src/parser.c + src/scanner.c 编译，这些纯副产物）
 *.obj
 *.lib
