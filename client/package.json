@@ -2,7 +2,7 @@
   "name": "unity-shader-tools",
   "displayName": "Unity Shader Tools",
   "description": "Unity .shader/.hlsl language support (tree-sitter + LSP)",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "publisher": "xiake-1",
   "license": "MIT",

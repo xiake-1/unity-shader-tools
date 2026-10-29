@@ -117,11 +117,12 @@ execFileSync(process.execPath, [vsceBin, 'package', '--no-dependencies', '--allo
 });
 
 const vsix = path.join(vsixDir, vsixName);
-if (!fs.existsSync(vsix)) {
-  // vsce 把产物写在 cwd；搬过来统一路径
-  const produced = path.join(stage, vsixName);
-  if (fs.existsSync(produced)) fs.renameSync(produced, vsix);
-}
+// vsce 把产物写在 cwd（stage）——必须无条件搬过来覆盖。
+// （曾先检查 dist-vsix 是否已有同名文件：本地重复打包时跳过搬运，
+//   后续 zip 追加落在旧 vsix 上 → 旧清单旧 bundle 混进「新」包，2026-10-29 实踩。）
+const produced = path.join(stage, vsixName);
+if (fs.existsSync(produced)) fs.renameSync(produced, vsix);
+else if (!fs.existsSync(vsix)) throw new Error(`vsce 未产出 vsix（找 ${produced} 与 ${vsix} 均无）`);
 
 // 5b) 把暂存的 node_modules 依赖闭包**补写进 vsix**。
 // vsce 的 `--no-dependencies` 会把文件收集退化为 `glob('**', cwd=stage, ignore:['node_modules/**'])`

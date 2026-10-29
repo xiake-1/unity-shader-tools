@@ -21,6 +21,20 @@ t = parser.parse('float4 f(){return 0;}');
 console.log('hlsl ok: ' + t.rootNode.type);
 console.log('lsp deps ok: ' + !!require(nm('vscode-languageserver')));
 
+// server 入口必须能在扩展根下解析，且 bundle 的 serverEntry 优先走该布局
+// （2026-10-29 上架首测：serverEntry 只写 '..' → 已安装时指向扩展目录外 → server 秒死 EPIPE）
+const serverJs = path.join(ext, 'server', 'out', 'server.js');
+if (!fs.existsSync(serverJs)) {
+  console.error('MISSING server entry: ' + serverJs);
+  process.exit(1);
+}
+const bundle = fs.readFileSync(path.join(ext, 'dist', 'extension.js'), 'utf8');
+if (!/join\("server",\s*"out",\s*"server\.js"\)/.test(bundle)) {
+  console.error('bundle serverEntry 缺已安装布局解析（join("server","out","server.js")）');
+  process.exit(1);
+}
+console.log('server entry ok: server/out/server.js + bundle resolution');
+
 // 当前平台的附带 dxc 必须在包里（ADR 0010；mac 等无官方产物的平台跳过该断言）
 const platDir =
   process.platform === 'win32' && (process.arch === 'x64' || process.arch === 'arm64')

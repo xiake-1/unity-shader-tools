@@ -29,7 +29,11 @@ let client: LanguageClient | undefined;
 let guard: RestartGuard | undefined;
 
 function serverEntry(context: vscode.ExtensionContext): string {
-  // 开发布局：client/ 与 server/ 同级；打包后由打包脚本调整
+  // 已安装布局：server/ 在扩展根下（vsix 解包即如此）；
+  // 开发布局：extensionPath=client/，server/ 与其同级 → 回退 '..'。
+  // （曾只写 '..'：已安装时指向扩展目录外 → server 秒死 EPIPE，2026-10-29 上架首测暴露。）
+  const installed = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
+  if (require('fs').existsSync(installed)) return installed;
   return context.asAbsolutePath(path.join('..', 'server', 'out', 'server.js'));
 }
 
