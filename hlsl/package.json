@@ -5,6 +5,7 @@
   "description": "Fork of tree-sitter-hlsl@0.2.0 (tree-sitter-grammars) + struct-body macro-member patch for Unity CGIncludes",
   "main": "bindings/node",
   "scripts": {
+    "install": "node -e \"const cp=require('child_process'),fs=require('fs');if(fs.existsSync('src/parser.c')){cp.execSync('node-gyp rebuild',{stdio:'inherit'})}else{console.log('[hlsl] src/parser.c 未生成（生成物不入库），跳过原生编译——先 npm run generate 再 compile/prebuild')}\"",
     "generate": "tree-sitter generate",
     "compile": "node-gyp rebuild",
     "test": "tree-sitter test",
