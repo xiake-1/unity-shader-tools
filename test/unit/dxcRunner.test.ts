@@ -98,8 +98,9 @@ describe('附带产物定位', () => {
     expect(r.ok && r.source).toBe('env');
     expect(r.ok && path.basename(r.path)).toBe('dxc.exe');
   });
-  it('仓库内附带产物可定位（third_party/dxc/win32-x64）', () => {
-    const r = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'out'), platform: 'win32', arch: 'x64' });
+  it('仓库内附带产物可定位（third_party/dxc/<当前平台档>）', () => {
+    // 按当前平台定位：CI 各 runner 只 fetch 当前平台产物，硬编码 win32 会让 Linux 上必假
+    const r = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'out'), platform: process.platform, arch: process.arch });
     if (!hasBundled) {
       expect(r.ok).toBe(false);
       return;
