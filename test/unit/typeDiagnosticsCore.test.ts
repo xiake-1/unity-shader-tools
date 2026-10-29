@@ -21,7 +21,7 @@ import {
 import type { CompileResult, DxcIssue } from '../../server/src/dxcRunner';
 import type { IncludeContext } from '../../server/src/includeResolver';
 import { DEFAULT_DXC_EXEMPTIONS, DxcExemptionTable, normalizeDxcMessage } from '../../server/src/dxcExemption';
-import { NEVER_DEFINED_BY_DEFAULT } from '../../server/src/dxcMacroTable';
+import { NEVER_DEFINED_BY_DEFAULT, parseMacroOverrides } from '../../server/src/dxcMacroTable';
 import { parseShaderLab } from '../../server/src/parser';
 
 /* ---------------- 语料夹具：四类 include 各一例 ---------------- */
@@ -401,6 +401,45 @@ describe('T-055 dxcExemption：按消息模式的豁免表', () => {
       expect(r.reason.length).toBeGreaterThan(20);
       expect(r.pattern).toBeInstanceOf(RegExp);
     }
+  });
+});
+
+describe('T-078/T-079 宏覆盖进 prepareTypeRun（feature-dxc-macro-overrides）', () => {
+  it('覆盖列表变 → 缓存键片段变；同列表 → 键相同（缓存靠 macros.join(\',\') 自然覆盖）', () => {
+    const text = shaderWith([]);
+    const base = prepareTypeRun(docFile, text, { includeCtx: CTX });
+    const same = prepareTypeRun(docFile, text, {
+      includeCtx: CTX,
+      macroOverrides: parseMacroOverrides([]),
+    });
+    const vk = prepareTypeRun(docFile, text, {
+      includeCtx: CTX,
+      macroOverrides: parseMacroOverrides(['SHADER_API_VULKAN']),
+    });
+    const vk2 = prepareTypeRun(docFile, text, {
+      includeCtx: CTX,
+      macroOverrides: parseMacroOverrides(['SHADER_API_VULKAN=2']),
+    });
+    expect(same.key).toBe(base.key);
+    expect(vk.key).not.toBe(base.key);
+    expect(vk2.key).not.toBe(vk.key);
+    expect(vk.macros).toContain('SHADER_API_VULKAN=1');
+  });
+
+  it('显式定义 SHADER_API_VULKAN → 它守卫的 include 不再按「确定为假」跳过', () => {
+    const text = shaderWith([
+      '      #if defined(SHADER_API_VULKAN)',
+      '      #include "Local.hlsl"',
+      '      #endif',
+    ]);
+    const dead = prepareTypeRun(docFile, text, { includeCtx: CTX });
+    expect(dead.plans[0].resolved.some((r) => pathEq(r, path.join(DOC_DIR, 'Local.hlsl')))).toBe(false);
+    const alive = prepareTypeRun(docFile, text, {
+      includeCtx: CTX,
+      macroOverrides: parseMacroOverrides(['SHADER_API_VULKAN']),
+    });
+    expect(alive.plans[0].resolved.some((r) => pathEq(r, path.join(DOC_DIR, 'Local.hlsl')))).toBe(true);
+    expect(alive.includeFailures).toEqual([]);
   });
 });
 

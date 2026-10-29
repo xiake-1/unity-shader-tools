@@ -31,7 +31,9 @@
       "unityShader.syntaxDiagnostics": true,
       "unityShader.includeDiagnostics": true,
       "unityShader.typeDiagnostics": true,
-      "unityShader.formatting.enable": true
+      "unityShader.formatting.enable": true,
+      "unityShader.autoFixLanguageId": true,
+      "unityShader.dxcMacroOverrides": []
     },
     "languages": [
       {
@@ -93,6 +95,18 @@
       {
         "command": "unityshader.runTypeDiagnostics",
         "title": "Unity Shader: Run Type Diagnostics (DXC)"
+      },
+      {
+        "command": "unityshader.reportVariants",
+        "title": "Unity Shader: Report Shader Variants (This File)"
+      },
+      {
+        "command": "unityshader.reportVariantsProject",
+        "title": "Unity Shader: Report Shader Variants (Project)"
+      },
+      {
+        "command": "unityshader.fixFileAssociations",
+        "title": "Unity Shader: Fix File Associations"
       }
     ],
     "configuration": {
@@ -215,6 +229,19 @@
           "default": 1048576,
           "minimum": 1024,
           "description": "超过该字节数的文档不格式化（返回 null 并记 format=too-large）"
+        },
+        "unityShader.autoFixLanguageId": {
+          "type": "boolean",
+          "default": true,
+          "description": "当 files.associations 把 .shader/.hlsl 等指向未注册语言 id 时，运行时把受影响文档切到本扩展的语言 id（不改任何设置；配合命令 “Unity Shader: Fix File Associations” 可持久修复）"
+        },
+        "unityShader.dxcMacroOverrides": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "DXC 类型诊断的宏覆盖列表：`NAME`（定义成 1）、`NAME=VALUE`（定义/改值）、`-NAME`（强制不定义）。用户显式条目优先，不被 Editor.log 的 Disabled keywords 减法减掉；非法条目逐条忽略并记日志"
         }
       }
     }

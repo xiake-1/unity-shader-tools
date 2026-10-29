@@ -18,7 +18,7 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver';
 import { collectIncludeNodes, includePathNode, includeSpecOf } from './diagnostics';
 import { resolveInclude, type IncludeContext } from './includeResolver';
 import { isCgSource } from './tempFiles';
-import { buildMacroArgs, extractFileDefines, NEVER_DEFINED_BY_DEFAULT } from './dxcMacroTable';
+import { buildMacroArgs, extractFileDefines, NEVER_DEFINED_BY_DEFAULT, type MacroOverrides } from './dxcMacroTable';
 import { collectInactiveRegions } from './inactiveRegions';
 import {
   compileUnit,
@@ -251,16 +251,24 @@ export function unitsForFile(file: string, text: string, tree?: Tree): CompileUn
   return buildCompileUnits(text, lab);
 }
 
-/** 准备一次类型诊断：单元、宏（默认表 − Disabled + 文件 `#define`）、include 计划、缓存键片段。 */
+/** 准备一次类型诊断：单元、宏（默认表 − Disabled + 文件 `#define` + 用户覆盖）、include 计划、缓存键片段。 */
 export function prepareTypeRun(
   file: string,
   text: string,
-  opts: { tree?: Tree; includeCtx: IncludeContext | null; disabled?: ReadonlySet<string>; dxcVersion?: string | null }
+  opts: {
+    tree?: Tree;
+    includeCtx: IncludeContext | null;
+    disabled?: ReadonlySet<string>;
+    dxcVersion?: string | null;
+    /** T-079：用户宏覆盖（`parseMacroOverrides` 产物）；缓存键靠 `macros.join(',')` 自然覆盖 */
+    macroOverrides?: MacroOverrides;
+  }
 ): PreparedRun {
   const units = unitsForFile(file, text, opts.tree);
   const macros = buildMacroArgs({
     disabled: opts.disabled,
     fileDefines: extractFileDefines(text),
+    overrides: opts.macroOverrides,
   });
   const hasRoots = !!(
     opts.includeCtx &&
@@ -268,8 +276,10 @@ export function prepareTypeRun(
   );
   const plans: IncludePlan[] = [];
   const includeFailures: string[] = [];
-  // 「确定为假」的宏名：Unity Disabled 集合 + 刻意不定义的平台族（dxcMacroTable 的防误加清单）
+  // 「确定为假」的宏名：Unity Disabled 集合 + 刻意不定义的平台族（dxcMacroTable 的防误加清单）。
+  // T-079：用户显式定义的名字不再「确定为假」——include 计划不能跳过它守卫的分支（规格范围 3）。
   const deadMacros = new Set<string>([...(opts.disabled ?? []), ...NEVER_DEFINED_BY_DEFAULT]);
+  for (const d of opts.macroOverrides?.defines ?? []) deadMacros.delete(d.name);
   for (const u of units) {
     const p = planUnitIncludes(u, file, opts.includeCtx, { deadMacros });
     plans.push(p);
@@ -484,6 +494,8 @@ export interface TypeRunOptions {
   dxcVersion?: string | null;
   includeCtx: IncludeContext | null;
   disabled?: ReadonlySet<string>;
+  /** T-079：用户宏覆盖（feature-dxc-macro-overrides） */
+  macroOverrides?: MacroOverrides;
   tree?: Tree;
   timeoutMs?: number;
   maxPerFile?: number;
@@ -554,6 +566,7 @@ export class TypeDiagnosticsProvider {
       includeCtx: opts.includeCtx,
       disabled: opts.disabled,
       dxcVersion: opts.dxcVersion,
+      macroOverrides: opts.macroOverrides,
     });
     counts.units = prepared.units.length;
     counts.degraded = prepared.degraded;

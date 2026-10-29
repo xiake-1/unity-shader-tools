@@ -95,6 +95,68 @@ export function extractFileDefines(text: string): MacroEntry[] {
   return out;
 }
 
+/* ---------------------------------------------------------------------------
+ * T-078：用户级宏覆盖（规格 feature-dxc-macro-overrides 范围 2/3；ADR 0014 缺口）
+ * 条目语法：`NAME`（定义成 1）/ `NAME=VALUE`（首个 `=` 拆分）/ `-NAME`（强制不定义）。
+ * 处置顺序＝默认表 → Disabled 减法（**显式覆盖条目豁免**，用户确认的优先级）→ 覆盖增删改。
+ * ------------------------------------------------------------------------- */
+
+export interface MacroOverrides {
+  /** 最终生效的增/改值条目（重复条目＝最后一条生效，已在解析里结清） */
+  defines: MacroEntry[];
+  /** 强制不定义的名字（作用于默认表与块外文件 `#define` 的注入，不动块内文本） */
+  removes: ReadonlySet<string>;
+  /** 被逐条拒绝的非法条目原文（日志 `macro-invalid=<n>`；不整表作废） */
+  invalid: string[];
+}
+
+export const EMPTY_OVERRIDES: MacroOverrides = { defines: [], removes: new Set<string>(), invalid: [] };
+
+const OVERRIDE_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** 解析覆盖列表为增删集合（纯函数，vitest 直接喂假列表）。非法判据见规格约束段。 */
+export function parseMacroOverrides(list: readonly string[]): MacroOverrides {
+  const invalid: string[] = [];
+  // 有序 map：后写条目覆盖先写（规格范围 3「重复条目 → 最后一条生效」）
+  const plan = new Map<string, { kind: 'define'; value?: string } | { kind: 'remove' }>();
+  for (const raw of list) {
+    const entry = (raw ?? '').trim();
+    if (!entry) {
+      invalid.push(String(raw));
+      continue;
+    }
+    if (entry.startsWith('-')) {
+      const name = entry.slice(1);
+      if (!OVERRIDE_NAME_RE.test(name)) {
+        invalid.push(entry); // 孤立的 `-`、`--x` 等
+        continue;
+      }
+      plan.set(name, { kind: 'remove' });
+      continue;
+    }
+    const eq = entry.indexOf('='); // 首个 `=` 拆分；值可含 `=` `:` `/`
+    const name = eq < 0 ? entry : entry.slice(0, eq);
+    const value = eq < 0 ? undefined : entry.slice(eq + 1);
+    // 名字非法、空值（`NAME=`）、值含空白（`A=a b`）→ 逐条拒绝
+    if (!OVERRIDE_NAME_RE.test(name) || value === '' || (value !== undefined && /\s/.test(value))) {
+      invalid.push(entry);
+      continue;
+    }
+    plan.set(name, { kind: 'define', ...(value !== undefined ? { value } : {}) });
+  }
+  const defines: MacroEntry[] = [];
+  const removes = new Set<string>();
+  for (const [name, op] of plan) {
+    if (op.kind === 'remove') {
+      removes.add(name);
+    } else {
+      // 裸 `NAME` → 值 1：内置头有裸 `#if X` 写法，空值宏会让表达式为空（同默认表理由）
+      defines.push({ name, value: op.value ?? '1', source: 'override' });
+    }
+  }
+  return { defines, removes, invalid };
+}
+
 export interface MacroTableOptions {
   /** `Editor.log` 的 Disabled keywords（只做减法） */
   disabled?: ReadonlySet<string>;
@@ -102,6 +164,8 @@ export interface MacroTableOptions {
   fileDefines?: readonly MacroEntry[];
   /** 额外注入（测试/用户配置） */
   extra?: readonly MacroEntry[];
+  /** T-078：用户显式覆盖（`parseMacroOverrides` 的产物）；在 Disabled 减法**之后**应用 */
+  overrides?: MacroOverrides;
 }
 
 /** 生成 `-D` 参数列表（`NAME` 或 `NAME=value`）。 */
@@ -111,7 +175,7 @@ export function buildMacroArgs(opts: MacroTableOptions = {}): string[] {
   const extra = opts.extra ?? [];
 
   const fileNames = new Set(fileDefines.map((d) => d.name));
-  const chosen: MacroEntry[] = [];
+  let chosen: MacroEntry[] = [];
 
   // 1. 默认表：被 Disabled 减掉的跳过；与文件 #define 同名的跳过（文件优先）
   for (const m of DEFAULT_MACROS) {
@@ -125,6 +189,17 @@ export function buildMacroArgs(opts: MacroTableOptions = {}): string[] {
   for (const m of extra) {
     if (disabled.has(m.name)) continue;
     chosen.push(m);
+  }
+
+  // 4. 覆盖（T-078）：`-NAME` 从宏表剔除（含块外文件 `#define` 的注入；块内文本不动）；
+  //    显式 define 同名替换并**豁免 Disabled 减法**（减法已发生在上面，这里不再受它约束）。
+  const ov = opts.overrides;
+  if (ov) {
+    if (ov.removes.size) chosen = chosen.filter((m) => !ov.removes.has(m.name));
+    for (const d of ov.defines) {
+      chosen = chosen.filter((m) => m.name !== d.name);
+      chosen.push(d);
+    }
   }
 
   const seen = new Set<string>();

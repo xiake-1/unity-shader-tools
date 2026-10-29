@@ -405,6 +405,20 @@ export function provideDefinition(
     return finalize(globalLocations(name, file, ctx), ctx, name);
   }
 
+  // 2b) `Fallback "…"` / `UsePass "…"` 的字符串 → 跳到该名的 `shader_block`（M6a T-069，规格范围 3）
+  //     同名多处（工程内 + 包内）全部返回；查不到（内置 Legacy Shaders 之类）→ 零结果 + `shader-def=unavailable`。
+  const fb = ancestor(node, 'fallback') ?? ancestor(node, 'use_pass');
+  if (fb && STRINGISH.has(node.type)) {
+    const name = node.text.replace(/^"|"$/g, '');
+    const info = ctx.index.getByName(name);
+    const shaderLocs = info && info.kind === 'shader' ? info.locations : [];
+    if (!shaderLocs.length) {
+      ctx.log(`shader-def=unavailable name="${name}"`);
+      return [];
+    }
+    return finalize(sortLocations(shaderLocs, file, ctx), ctx, name);
+  }
+
   // 3) 注释、字面量、匿名标点、语义名 → 无定义
   if (!node.isNamed || LITERAL_TYPES.has(node.type)) return [];
   if (node.parent && (node.parent.type === 'semantics' || node.parent.type === 'bitfield_clause')) return [];

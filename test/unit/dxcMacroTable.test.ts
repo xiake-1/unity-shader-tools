@@ -6,6 +6,7 @@ import {
   buildMacroArgs,
   defaultMacroNamesMinus,
   extractFileDefines,
+  parseMacroOverrides,
 } from '../../server/src/dxcMacroTable';
 import { compileUnit, resolveDxc } from '../../server/src/dxcRunner';
 
@@ -91,5 +92,71 @@ describe('真实 DXC：宏决定分支是否被编译（附带产物缺失则跳
       label: 'macro-off',
     });
     expect(r.errorCount).toBe(0);
+  });
+});
+
+describe('T-078 宏覆盖解析（feature-dxc-macro-overrides 范围 2/3）', () => {
+  it('`NAME` → 值 1；`NAME=V` 按首个 `=` 拆分（值可含 `=` `:` `/`）', () => {
+    const ov = parseMacroOverrides(['SHADER_API_VULKAN', 'SHADER_TARGET=60', 'A=x=y', 'B=a/b:c']);
+    const get = (n: string) => ov.defines.find((d) => d.name === n)?.value;
+    expect(get('SHADER_API_VULKAN')).toBe('1');
+    expect(get('SHADER_TARGET')).toBe('60');
+    expect(get('A')).toBe('x=y');
+    expect(get('B')).toBe('a/b:c');
+    expect(ov.invalid).toEqual([]);
+  });
+  it('`-NAME` → 移除集合；`-` 与 `--x` 非法', () => {
+    const ov = parseMacroOverrides(['-SHADER_API_D3D11', '-', '--x']);
+    expect([...ov.removes]).toEqual(['SHADER_API_D3D11']);
+    expect(ov.invalid).toEqual(['-', '--x']);
+  });
+  it('非法判据逐条拒绝不整表作废：空串、含空白、名字非法、空值、值含空白', () => {
+    const ov = parseMacroOverrides(['', 'bad name', '=5', '9X', 'NAME=', 'A=a b', 'GOOD=1']);
+    expect(ov.invalid).toEqual(['', 'bad name', '=5', '9X', 'NAME=', 'A=a b']);
+    expect(ov.defines.map((d) => d.name)).toEqual(['GOOD']);
+  });
+  it('重复条目 → 最后一条生效（define 覆盖 define；define 后 -NAME 则只剩移除）', () => {
+    const a = parseMacroOverrides(['A=1', 'A=2']);
+    expect(a.defines.map((d) => `${d.name}=${d.value}`)).toEqual(['A=2']);
+    const b = parseMacroOverrides(['A=1', '-A']);
+    expect(b.defines).toEqual([]);
+    expect([...b.removes]).toEqual(['A']);
+    const c = parseMacroOverrides(['-A', 'A=1']);
+    expect([...c.removes]).toEqual([]);
+    expect(c.defines.map((d) => `${d.name}=${d.value}`)).toEqual(['A=1']);
+  });
+});
+
+describe('T-078 buildMacroArgs 应用覆盖（处置顺序＝默认表→Disabled 减法→覆盖）', () => {
+  it('空覆盖输出与现状**字节相同**（门槛零漂移的回归钉）', () => {
+    const base = buildMacroArgs({ disabled: new Set(['SHADER_API_DESKTOP']) });
+    const withEmpty = buildMacroArgs({ disabled: new Set(['SHADER_API_DESKTOP']), overrides: parseMacroOverrides([]) });
+    expect(withEmpty).toEqual(base);
+  });
+  it('`SHADER_API_VULKAN` 进 `-D`；`-SHADER_API_D3D11` 使其不出现', () => {
+    const args = buildMacroArgs({ overrides: parseMacroOverrides(['SHADER_API_VULKAN', '-SHADER_API_D3D11']) });
+    expect(args).toContain('SHADER_API_VULKAN=1');
+    expect(args.some((a) => a.startsWith('SHADER_API_D3D11'))).toBe(false);
+  });
+  it('显式条目**豁免 Disabled 减法**：默认表名字被 Disabled 减掉后仍可显式加回；对照组缺席', () => {
+    const disabled = new Set(['SHADER_API_D3D11']);
+    const without = buildMacroArgs({ disabled });
+    expect(without.some((a) => a.startsWith('SHADER_API_D3D11'))).toBe(false);
+    const withOv = buildMacroArgs({ disabled, overrides: parseMacroOverrides(['SHADER_API_D3D11=1']) });
+    expect(withOv).toContain('SHADER_API_D3D11=1');
+  });
+  it('显式定义 NEVER_DEFINED 名单里的名字（换平台族主场景）→ 进 `-D`；不写则不出现', () => {
+    const without = buildMacroArgs({});
+    expect(without.some((a) => a.startsWith('SHADER_API_VULKAN'))).toBe(false);
+    const withOv = buildMacroArgs({ overrides: parseMacroOverrides(['SHADER_API_VULKAN']) });
+    expect(withOv).toContain('SHADER_API_VULKAN=1');
+  });
+  it('`-NAME` 连块外文件 `#define` 的注入也剔除；同名覆盖改值（最后生效）', () => {
+    const fd = extractFileDefines('#define SHADER_TARGET 30\n#define MY_FLAG 7');
+    const removed = buildMacroArgs({ fileDefines: fd, overrides: parseMacroOverrides(['-MY_FLAG']) });
+    expect(removed.some((a) => a.startsWith('MY_FLAG'))).toBe(false);
+    expect(removed).toContain('SHADER_TARGET=30');
+    const overridden = buildMacroArgs({ fileDefines: fd, overrides: parseMacroOverrides(['SHADER_TARGET=60']) });
+    expect(overridden.filter((a) => a.startsWith('SHADER_TARGET'))).toEqual(['SHADER_TARGET=60']);
   });
 });

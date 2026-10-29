@@ -11,6 +11,8 @@ async function run() {
     require('./typeDiagnostics.test.js'),
     require('./formatting.test.js'),
     require('./deadBranch.test.js'),
+    require('./shaderNames.test.js'),
+    require('./languageId.test.js'),
     require('./extension.test.js'),
   ];
   // 只跑名字包含该子串的用例（崩溃用例很慢，迭代时用它过滤）

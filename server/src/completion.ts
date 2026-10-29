@@ -65,6 +65,7 @@ export interface CompletionContext {
 export type CompletionSite =
   | { kind: 'member'; base: string; prefix: string; node: SyntaxNode }
   | { kind: 'include'; prefix: string; replaceRange: Range }
+  | { kind: 'shaderName'; prefix: string; replaceRange: Range }
   | { kind: 'semantic'; prefix: string }
   | { kind: 'identifier'; prefix: string }
   | { kind: 'none' };
@@ -172,6 +173,27 @@ export function detectCompletionSite(
   ) {
     const prefix = before.text.slice(0, Math.max(0, character - before.startPosition.column));
     return { kind: 'semantic', prefix };
+  }
+
+  // 3b) `Fallback "…"` / `UsePass "…"` → shader 名候选（M6a T-069，规格范围 2）。
+  //     只在**已开引号**时给候选：ShaderLab 的 `string` token 本身带引号（grammar `string: /"…"/`），
+  //     所以 `Fallback Off`（`kw_off` 只在 fallback 之后合法）与未开引号的位置一律零候选。
+  const fb = ancestor(before, 'fallback') ?? ancestor(before, 'use_pass');
+  if (fb) {
+    const upto = text.slice(fb.startIndex, offset);
+    const m = /^[A-Za-z_][A-Za-z_0-9]*[ \t]+"([^"\r\n]*)$/.exec(upto);
+    if (!m) return { kind: 'none' };
+    const prefix = m[1];
+    const closeQuote = text.indexOf('"', offset);
+    const sameLine = closeQuote >= 0 && !text.slice(offset, closeQuote).includes('\n');
+    return {
+      kind: 'shaderName',
+      prefix,
+      replaceRange: {
+        start: { line, character: character - prefix.length },
+        end: { line, character: sameLine ? character + (closeQuote - offset) : character },
+      },
+    };
   }
 
   // 4) 空结果面：注释、字面量、非 include 字符串
@@ -315,6 +337,7 @@ function identifierCandidates(site: { prefix: string }, file: string, ctx: Compl
   const out: Candidate[] = [];
   for (const info of ctx.index.queryByPrefix(site.prefix, 2000)) {
     if (info.kind === 'struct' || info.kind === 'field') continue; // struct 名/字段不作标识符候选
+    if (info.kind === 'shader') continue; // shader 名只在 `Fallback`/`UsePass` 处给（M6a T-069）
     let best = Infinity;
     for (const l of info.locations) {
       const r = rankOf(l, file, closure, ctx);
@@ -339,6 +362,23 @@ function identifierCandidates(site: { prefix: string }, file: string, ctx: Compl
       doc: info.doc ?? macroDescription(info.name),
       insertText: info.name,
     });
+  }
+  return out;
+}
+
+/** M6a T-069：shader 名候选（规格范围 2）。
+ *  排序沿用既有五层口径（当前文件→闭包→工程→包→内置）与 300 截断，不新造第二套；
+ *  但 shader 名是**全局可寻址**的（`Fallback`/`UsePass` 按名查，不看编译单元），
+ *  所以不像标识符那样把「工程内非闭包文件」排除掉，只按 rank 排序。 */
+function shaderNameCandidates(site: { prefix: string }, file: string, ctx: CompletionContext): Candidate[] {
+  const closure = closureOrder(file, ctx.index, ctx.includeCtx);
+  const out: Candidate[] = [];
+  for (const info of ctx.index.queryByPrefix(site.prefix, 2000)) {
+    if (info.kind !== 'shader') continue;
+    let best = Infinity;
+    for (const l of info.locations) best = Math.min(best, rankOf(l, file, closure, ctx));
+    if (best === Infinity) continue;
+    out.push({ label: info.name, kind: CompletionItemKind.Class, rank: best, doc: info.doc, insertText: info.name });
   }
   return out;
 }
@@ -380,6 +420,8 @@ export function provideCompletion(
     if (trees) candidates = memberCandidates(site, file, trees, ctx);
   } else if (site.kind === 'include') {
     candidates = includeCandidates(site, file, ctx);
+  } else if (site.kind === 'shaderName') {
+    candidates = shaderNameCandidates(site, file, ctx);
   } else if (site.kind === 'semantic') {
     candidates = semanticSiteCandidates(site);
   } else if (site.kind === 'identifier') {

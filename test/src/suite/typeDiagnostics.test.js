@@ -257,6 +257,59 @@ const tests = {
     await setSetting('dxcPath', '');
     await waitTypeStats((x) => x.dxcState === 'ok');
   },
+
+  'T-079 宏覆盖：注入 SHADER_API_VULKAN → 死分支参与编译报类型错误（配置变更即重算，无需保存）': async () => {
+    await setSetting('dxcMacroOverrides', []);
+    const file = write('Assets/td-macro-vk.shader', [
+      'Shader "TD/MacroVk"',
+      '{',
+      '  SubShader',
+      '  {',
+      '    Pass { HLSLPROGRAM',
+      '      #if SHADER_API_VULKAN',
+      '      float4 bad_fn() { float4 c = float3(1,1,1); return c; }',
+      '      #endif',
+      '      ENDHLSL }',
+      '  }',
+      '}',
+    ]);
+    const doc = await open(file);
+    await sleep(2500);
+    assert.strictEqual(typeDiags(doc.uri).length, 0, '默认：VULKAN 不在宏集，分支应死（零诊断）');
+    await setSetting('dxcMacroOverrides', ['SHADER_API_VULKAN']);
+    const got = await waitForTypeDiags(doc.uri, (d) => d.length > 0, 25000);
+    assert.ok(got, '覆盖注入后分支应参与编译并报类型错误（配置变更 → 已打开文档重算）');
+    const s = await stats();
+    assert.strictEqual(s.typeDiagnostics.macroOverrides.applied, 1, 'stats 应记 applied=1');
+  },
+
+  'T-079 宏覆盖：-SHADER_API_D3D11 使默认分支死；非法条目逐条忽略不整表作废': async () => {
+    const file = write('Assets/td-macro-d3d.shader', [
+      'Shader "TD/MacroD3D"',
+      '{',
+      '  SubShader',
+      '  {',
+      '    Pass { HLSLPROGRAM',
+      '      #if SHADER_API_D3D11',
+      '      float4 bad_fn() { float4 c = float3(1,1,1); return c; }',
+      '      #endif',
+      '      ENDHLSL }',
+      '  }',
+      '}',
+    ]);
+    const doc = await open(file);
+    const had = await waitForTypeDiags(doc.uri, (d) => d.length > 0, 25000);
+    assert.ok(had, '默认 D3D11 宏在表 → 分支真，应先有诊断');
+    await setSetting('dxcMacroOverrides', ['-SHADER_API_D3D11']);
+    const gone = await waitForTypeDiags(doc.uri, (d) => d.length === 0, 25000);
+    assert.ok(gone, '-SHADER_API_D3D11 后分支应死、诊断清空');
+    await setSetting('dxcMacroOverrides', ['bad name']);
+    const back = await waitForTypeDiags(doc.uri, (d) => d.length > 0, 25000);
+    assert.ok(back, '非法条目只逐条忽略：其余照常，分支仍真');
+    const s = await stats();
+    assert.strictEqual(s.typeDiagnostics.macroOverrides.invalid, 1, 'stats 应记 invalid=1');
+    await setSetting('dxcMacroOverrides', []);
+  },
 };
 
 module.exports = { tests };

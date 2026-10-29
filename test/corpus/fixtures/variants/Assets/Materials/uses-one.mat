@@ -1,0 +1,10 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 6
+  m_Name: UsesOne
+  m_Shader: {fileID: 4800000, guid: ed945eecd1c2d494da666dde472e017d, fileID: 0}
+  m_ShaderKeywords: A F
+  m_CustomRenderQueue: -1
+  stringTags: {}

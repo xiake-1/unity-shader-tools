@@ -1,13 +1,22 @@
 /**
  * T-050：编译单元切分与分块虚拟文档（规格 feature-type-diagnostics 范围 1/2、验收「坐标恒等」）。
  * T-051：一次编译与输出解析（真实附带 dxc，缺失时跳过）。
+ * T-068：swizzle 的正例（越界分量报错）与负例（合法重排不报）—— 规格
+ *   feature-type-diagnostics 验收「非法 swizzle」子项，走真机 dxc + 真实 include 根。
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { parseShaderLab, parseHlslFile } from '../../server/src/parser';
 import { isCgSource } from '../../server/src/tempFiles';
-import { assertCoordinateIdentity, buildCompileUnits, wholeFileUnit } from '../../server/src/typeDiagnostics';
+import {
+  assertCoordinateIdentity,
+  buildCompileUnits,
+  typeDiagnosticLogLine,
+  TypeDiagnosticsProvider,
+  wholeFileUnit,
+} from '../../server/src/typeDiagnostics';
 import { compileUnit, dxcArgList, dxcBaseArgs, parseDxcOutput, resolveDxc } from '../../server/src/dxcRunner';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -177,5 +186,92 @@ describe('T-051 真实编译（附带 dxc，缺失则跳过）', () => {
     const r = await compileUnit({ exePath: path.join(REPO_ROOT, 'nope.exe'), virtualText: 'float4 f(){return 0;}' });
     expect(r.status).toBe('spawn-failed');
     expect(r.issues).toEqual([]);
+  });
+});
+
+/* ---------------- T-068：swizzle 的正例与负例（规格验收「非法 swizzle」） ---------------- */
+
+describe('T-068 swizzle 诊断（真机 dxc + 真实 include 根）', () => {
+  const res = resolveDxc({ env: {}, moduleDir: path.join(REPO_ROOT, 'server', 'src'), platform: 'win32', arch: 'x64' });
+  const skip = !res.ok;
+
+  // includeCtx 必须是**真实存在的目录**：传 null 会走 `degraded=skip-type-diag`，整块不产诊断
+  // （规格异常表；实测见 log 2026-10-29 08:20 —— 那次探针 degraded=true / compiled=0 就是这个原因）。
+  const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'unityshader-swizzle-'));
+  const DOC = path.join(TMP, 'Assets', 'Shaders');
+  const CGINC = path.join(TMP, 'Editor', 'Data', 'CGIncludes');
+  fs.mkdirSync(DOC, { recursive: true });
+  fs.mkdirSync(CGINC, { recursive: true });
+  const CTX = {
+    projectRoot: TMP,
+    cgIncludesDir: CGINC,
+    packageCacheDir: path.join(TMP, 'Library', 'PackageCache'),
+  };
+  const docFile = path.join(DOC, 'swizzle.shader');
+
+  /** 夹具：swizzle 落在**第 7 行**，`c` 的 0 基列 = 48（6 空格缩进 + 42 字符前缀）。 */
+  function shaderWith(expr: string): string {
+    return [
+      'Shader "T068/Swizzle"',
+      '{',
+      '  SubShader',
+      '  {',
+      '    Pass {',
+      '      HLSLPROGRAM',
+      `      float4 probe(float4 c, float4 d) { return ${expr}; }`,
+      '      ENDHLSL',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+  }
+
+  async function run(expr: string) {
+    const text = shaderWith(expr);
+    const provider = new TypeDiagnosticsProvider(2);
+    return provider.run(docFile, text, {
+      version: 1,
+      syntaxErrorCount: 0,
+      dxc: { ok: true, path: (res as { path: string }).path, dir: path.dirname((res as { path: string }).path), source: 'bundled', platformDir: 'win32-x64' },
+      includeCtx: CTX,
+      tree: parseShaderLab(text),
+    });
+  }
+
+  it('夹具本身成立：一个编译单元、非降级态', async () => {
+    if (skip) return;
+    const r = await run('c.xyzw');
+    expect(r.counts.units).toBe(1);
+    expect(r.counts.degraded).toBe(false);
+    expect(r.counts.compiled).toBe(1);
+    expect(r.diagnostics).toEqual([]);
+  });
+
+  it('正例：越界分量 `c.xyzwq` → 恰好 1 条 Error，坐标恒等落在第 7 行', async () => {
+    if (skip) return;
+    const r = await run('c.xyzwq');
+    expect(r.counts.compiled).toBe(1);
+    expect(r.diagnostics.length).toBe(1);
+    const d = r.diagnostics[0];
+    expect(d.severity).toBe(1); // DiagnosticSeverity.Error
+    expect(d.source).toBe('Unity Shader (DXC)');
+    expect(d.code).toBeUndefined(); // 前端语义错误无错误码
+    expect(d.message).toContain('invalid format for vector swizzle');
+    // 坐标恒等：原文第 7 行 → LSP line 6；DXC 指向 swizzle 成员首字符（1 基列 51 → 0 基 50）。
+    // 终点按规格范围 7 的口径 = 该行起点起的第一个非空白 run，故含尾随 `;`（到 56）。
+    expect(d.range.start).toEqual({ line: 6, character: 50 });
+    expect(d.range.end).toEqual({ line: 6, character: 56 });
+    expect(shaderWith('c.xyzwq').split('\n')[6].slice(d.range.start.character, d.range.end.character)).toBe('xyzwq;');
+    expect(typeDiagnosticLogLine(docFile, r.counts)).toContain('compiled=1 errors=1');
+  });
+
+  it('负例：合法重排 `c.wwwz` → 零诊断，且确实编译过（compiled=1）', async () => {
+    if (skip) return;
+    const r = await run('c.wwwz');
+    expect(r.counts.compiled).toBe(1);
+    expect(r.counts.produced).toBe(0);
+    expect(r.diagnostics).toEqual([]);
+    expect(typeDiagnosticLogLine(docFile, r.counts)).toContain('compiled=1 errors=0');
   });
 });

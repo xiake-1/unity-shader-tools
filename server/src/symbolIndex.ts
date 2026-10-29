@@ -20,7 +20,7 @@ import {
 } from './parser';
 import { isDeclarationMacro, macroKind } from './macroTable';
 
-export type SymbolKind = 'property' | 'variable' | 'function' | 'struct' | 'field' | 'macro';
+export type SymbolKind = 'property' | 'variable' | 'function' | 'struct' | 'field' | 'macro' | 'shader';
 
 export interface Position {
   row: number;
@@ -154,7 +154,7 @@ function precedingComment(node: Parser.SyntaxNode): string | undefined {
   return text.length ? text : undefined;
 }
 
-/** ShaderLab 层：Properties 属性 + include 规格 */
+/** ShaderLab 层：Properties 属性 + `Shader "名字"` + include 规格 */
 function extractShaderLab(
   root: Parser.SyntaxNode,
   text: string,
@@ -167,6 +167,14 @@ function extractShaderLab(
       const nameNode = n.children.find((c) => c.type === 'word');
       if (nameNode) {
         symbols.push({ name: textOf(nameNode, text), kind: 'property', loc: loc(nameNode, file) });
+      }
+    } else if (n.type === 'shader_block') {
+      // M6a（T-069）：`shader_block: seq(kw_shader, string, '{', …)` → 名字取 `string` 子节点，
+      // **保留原文**（含空格与 `/`，如 `Legacy Shaders/Diffuse`）；位置 = 整个 `shader_block` 的起始
+      // （跳转要落到 `Shader "…"` 那一行，不是引号里）。一个文件多个 shader_block 全部入。
+      const str = n.children.find((c) => c.type === 'string');
+      if (str) {
+        symbols.push({ name: textOf(str, text).replace(/^"|"$/g, ''), kind: 'shader', loc: loc(n, file) });
       }
     } else if (n.type === 'preproc_include') {
       const str = n.children.find((c) => c.type === 'string');
@@ -471,6 +479,13 @@ export class SymbolIndex {
 
   get symbolCount(): number {
     return this.byName.size;
+  }
+
+  /** M6a（T-069）：shader 名条目数（`showIndexStats` 的 `shaderNames=` 口径，规格对应模块段要求） */
+  get shaderNameCount(): number {
+    let n = 0;
+    for (const info of this.byName.values()) if (info.kind === 'shader') n++;
+    return n;
   }
 
   /** 当前文件的 include 闭包（解析后的文件集合），供懒索引与 M2 使用 */

@@ -13,6 +13,17 @@ import {
   ErrorHandlerResult,
 } from 'vscode-languageclient/node';
 import { RestartGuard } from './restartGuard';
+import {
+  type AssocEntry,
+  type AssocScope,
+  commandTargets,
+  invalidAssociationEntries,
+  mergeAssociationEntries,
+  mergeAssociations,
+  planAssociationRewrite,
+  shouldSelfHeal,
+  targetIdFor,
+} from './languageIdFix';
 
 let client: LanguageClient | undefined;
 let guard: RestartGuard | undefined;
@@ -116,6 +127,8 @@ export function activate(context: vscode.ExtensionContext): void {
         dxcPath: settings.get<string>('dxcPath', ''),
         dxcTimeoutMs: settings.get<number>('dxcTimeoutMs', 5000),
         maxTypeDiagnosticsPerFile: settings.get<number>('maxTypeDiagnosticsPerFile', 100),
+        // 宏覆盖（规格 feature-dxc-macro-overrides 范围 1；默认空列表＝门槛零漂移）
+        dxcMacroOverrides: settings.get<string[]>('dxcMacroOverrides', []),
         // M5 格式化（规格 feature-formatting 范围 7；默认值与 `gate:format` 联动）
         formatting: {
           enable: settings.get<boolean>('formatting.enable', true),
@@ -318,6 +331,23 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       return res;
     }),
+    // M6a（T-072）变体分析报告：分析在 server（只读），这里只把结果写进**专用 Output 通道**
+    vscode.commands.registerCommand('unityshader.reportVariants', async () => {
+      if (!client) return null;
+      const uri = activeFileUri();
+      const res = (await client.sendRequest('workspace/executeCommand', {
+        command: 'unityshader/reportVariants',
+        arguments: uri ? [{ uri }] : [],
+      })) as VariantReportResult | null;
+      return showVariantReport(res);
+    }),
+    vscode.commands.registerCommand('unityshader.reportVariantsProject', async () => {
+      if (!client) return null;
+      const res = (await client.sendRequest('workspace/executeCommand', {
+        command: 'unityshader/reportVariantsProject',
+      })) as VariantReportResult | null;
+      return showVariantReport(res);
+    }),
     // 测试钩子：客户端连接状态（initial/starting/running/stopping/stopped/startFailed）
     vscode.commands.registerCommand('unityshader/__testClientState', () => lastState),
     // 测试钩子：把 server 的索引统计原样返回（集成测试断言降级状态）
@@ -348,9 +378,178 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // M6a（T-072）：变体报告写进**专用** Output 通道，不混进 'Unity Shader Tools' 日志通道
+  variantsChannel = vscode.window.createOutputChannel('Unity Shader Variants');
+  context.subscriptions.push(variantsChannel);
+
+  // ---- T-075/T-076：ADR 0006 第 2/3 层（规格 feature-language-id-coexistence）----
+  // 自愈只处理「`files.associations` 把我们的扩展名指向未注册 id」这一种 plaintext
+  // （三条件判定在 languageIdFix.shouldSelfHeal）；用户手动选的 plaintext 不动。
+  const langIdChannel = vscode.window.createOutputChannel('Unity Shader Language ID');
+  context.subscriptions.push(langIdChannel);
+  const langIdLog = (line: string): void => {
+    langIdChannel.appendLine(line);
+    trace(line);
+  };
+  /** 本会话已切过的文档 uri：一份至多一次；用户切回 plaintext 不再切（规格范围 6） */
+  const switchedDocs = new Set<string>();
+  let langIdSwitches = 0;
+
+  const assocEntries = (): AssocEntry[] => {
+    const cfg = vscode.workspace.getConfiguration('files').inspect('associations');
+    return mergeAssociationEntries(
+      cfg?.workspaceValue as Record<string, string> | undefined,
+      cfg?.globalValue as Record<string, string> | undefined
+    );
+  };
+
+  const runSelfHeal = async (reason: string): Promise<void> => {
+    if (vscode.workspace.getConfiguration('unityShader').get<boolean>('autoFixLanguageId', true) === false) return;
+    const registered = new Set(await vscode.languages.getLanguages());
+    const invalid = invalidAssociationEntries(assocEntries(), registered);
+    let fixed = 0;
+    let scanned = 0;
+    for (const doc of vscode.workspace.textDocuments) {
+      if (doc.uri.scheme !== 'file') continue;
+      scanned++;
+      if (switchedDocs.has(doc.uri.toString())) continue;
+      if (!shouldSelfHeal({ fileName: doc.fileName, languageId: doc.languageId }, invalid)) continue;
+      const to = targetIdFor(doc.fileName);
+      if (!to) continue;
+      try {
+        await vscode.languages.setTextDocumentLanguage(doc, to);
+        switchedDocs.add(doc.uri.toString());
+        langIdSwitches++;
+        fixed++;
+        langIdLog(`[language-id] switched=${path.basename(doc.fileName)} to=${to} trigger=${reason}`);
+      } catch {
+        /* 文档已关闭或被拒：跳过，不崩（规格异常表） */
+      }
+    }
+    if (fixed > 0 || reason === 'activate' || reason === 'test') {
+      langIdLog(`[language-id] self-heal fixed=${fixed} scanned=${scanned} trigger=${reason}`);
+    }
+  };
+
+  interface FixAssociationsResult {
+    fixed: number;
+    scanned: number;
+    target?: AssocScope;
+    error?: string;
+    skippedMixed: string[];
+  }
+  const fixFileAssociations = async (forcedTarget?: unknown): Promise<FixAssociationsResult> => {
+    const registered = new Set(await vscode.languages.getLanguages());
+    const entries = assocEntries();
+    const plan = planAssociationRewrite(entries, registered);
+    const scanned = entries.length;
+    if (plan.rewrite.length === 0) {
+      langIdLog(
+        `[language-id] fixed=0 scanned=${scanned} nothing-to-fix` +
+          (plan.skippedMixed.length ? ` skipped=mixed-glob:${plan.skippedMixed.join(',')}` : '')
+      );
+      void vscode.window.showInformationMessage('Unity Shader：没有需要修复的文件关联');
+      return { fixed: 0, scanned, skippedMixed: plan.skippedMixed };
+    }
+    let target: AssocScope | undefined;
+    if (forcedTarget === 'workspace' || forcedTarget === 'user') {
+      target = forcedTarget; // 编程式调用/集成测试：跳过对话框（真实用户走命令面板，无参数 → 弹窗）
+    } else {
+      const labels = commandTargets(vscode.workspace.workspaceFolders !== undefined).map((t) =>
+        t === 'workspace' ? 'Workspace' : 'User'
+      );
+      const picked = await vscode.window.showWarningMessage(
+        `Unity Shader：发现 ${plan.rewrite.length} 条文件关联指向未注册的语言 id（${plan.rewrite
+          .map((r) => `"${r.glob}"→"${r.fromId}"`)
+          .join('、')}）。把修复写到哪一级设置？`,
+        { modal: true },
+        ...labels
+      );
+      if (!picked) return { fixed: 0, scanned, error: 'cancelled', skippedMixed: plan.skippedMixed };
+      target = picked === 'Workspace' ? 'workspace' : 'user';
+    }
+    const cfg = vscode.workspace.getConfiguration('files');
+    const scope = target === 'workspace' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    const inspected = cfg.inspect('associations');
+    const current =
+      ((target === 'workspace' ? inspected?.workspaceValue : inspected?.globalValue) ?? {}) as Record<string, string>;
+    try {
+      // 条目级写回：只改命中条目，其余键原样保留（规格约束「不整对象覆盖」）
+      await cfg.update('associations', mergeAssociations(current, plan), scope);
+    } catch (err) {
+      langIdLog(`[language-id] write-failed=${String(err).slice(0, 160)} target=${target}`);
+      void vscode.window.showErrorMessage('Unity Shader：写入文件关联失败（settings 可能只读）');
+      return { fixed: 0, scanned, target, error: 'write-failed', skippedMixed: plan.skippedMixed };
+    }
+    langIdLog(`[language-id] fixed=${plan.rewrite.length} scanned=${scanned} target=${target}`);
+    if (plan.skippedMixed.length) langIdLog(`[language-id] skipped=mixed-glob ${plan.skippedMixed.join(' ')}`);
+    // T-077：写回设置后，对仍处 plaintext 的匹配文档再跑一次自愈判定（规格范围 10）
+    await runSelfHeal('after-fix');
+    return { fixed: plan.rewrite.length, scanned, target, skippedMixed: plan.skippedMixed };
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('unityshader.fixFileAssociations', (target?: unknown) => fixFileAssociations(target)),
+    // 测试钩子：跑一次自愈扫描，返回切换集合与累计切换次数（幂等断言：≤1/会话）
+    vscode.commands.registerCommand('unityshader/__testLanguageIdScan', async () => {
+      await runSelfHeal('test');
+      return { switched: [...switchedDocs], switches: langIdSwitches };
+    }),
+    vscode.commands.registerCommand('unityshader/__testLanguageIdState', () => ({
+      switches: langIdSwitches,
+      switched: [...switchedDocs],
+      autoFix: vscode.workspace.getConfiguration('unityShader').get<boolean>('autoFixLanguageId', true),
+    }))
+  );
+
+  // 第 2 层接线：activate 时对已打开文档补跑 + 订阅新打开（**不新增** `onLanguage:plaintext`
+  // 激活事件——规格约束：不为自愈扩大激活面，plaintext 文档只在扩展已激活时被处理）
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (doc.uri.scheme === 'file') void runSelfHeal('open');
+    })
+  );
+  void runSelfHeal('activate');
+
   client.start().then(undefined, (err) => {
     trace(`start() rejected: ${err && err.message ? err.message : String(err)}`);
   });
+}
+
+/** M6a（T-072）：变体分析报告的客户端侧收口。分析全在 server（只读），这里只呈现。 */
+let variantsChannel: vscode.OutputChannel | undefined;
+
+interface VariantReportResult {
+  error?: string;
+  scope?: string;
+  files?: number;
+  shaders?: number;
+  builtinGroups?: number;
+  materials?: { mapped?: number; unmapped?: number; evidence?: string };
+  suggestions?: number;
+  lines?: string[];
+}
+
+function showVariantReport(res: VariantReportResult | null): VariantReportResult | null {
+  if (!res) return null;
+  if (res.error === 'no-open-document') {
+    void vscode.window.showInformationMessage(
+      'Unity Shader 变体报告：没有活动文档（要汇总整个工程请用 “Report Shader Variants (Project)”）'
+    );
+    return res;
+  }
+  if (res.error === 'no-workspace') {
+    void vscode.window.showInformationMessage('Unity Shader 变体报告：没有打开工作区文件夹');
+    return res;
+  }
+  if (!variantsChannel) variantsChannel = vscode.window.createOutputChannel('Unity Shader Variants');
+  variantsChannel.clear();
+  variantsChannel.appendLine(
+    `# Unity Shader 变体报告 · ${res.scope ?? 'file'}：文件 ${res.files ?? 0}，shader ${res.shaders ?? 0}，内置组 ${res.builtinGroups ?? 0}`
+  );
+  for (const l of res.lines ?? []) variantsChannel.appendLine(l);
+  variantsChannel.show(true);
+  return res;
 }
 
 export function deactivate(): Thenable<void> | undefined {

@@ -23,7 +23,9 @@ import { SymbolIndex } from './symbolIndex';
 import { discoverUnityEnvironment, type UnityEnvironment } from './unityProject';
 import { resolveInclude, type IncludeContext } from './includeResolver';
 import { isGeneratedFile, isCgSource } from './tempFiles';
-import { provideDefinition } from './definition';
+import { provideDefinition, docTrees } from './definition';
+import { analyzeVariants, variantDetailLines, variantSummaryLine } from './variantReport';
+import { collectMaterialSources, materialScanLine, scanMaterials, suggestStripping } from './materialScan';
 import { provideCompletion } from './completion';
 import { provideHover } from './hover';
 import { provideReferences } from './references';
@@ -58,6 +60,7 @@ import {
   resolveIndentOptions,
   type FormatSwitches,
 } from './formatSettings';
+import { parseMacroOverrides, EMPTY_OVERRIDES, type MacroOverrides } from './dxcMacroTable';
 
 interface Settings {
   trace: 'off' | 'messages' | 'verbose';
@@ -78,6 +81,8 @@ interface Settings {
   dxcPath: string;
   dxcTimeoutMs: number;
   maxTypeDiagnosticsPerFile: number;
+  // 宏覆盖（规格 feature-dxc-macro-overrides 范围 1：`NAME` / `NAME=VALUE` / `-NAME`）
+  dxcMacroOverrides: string[];
   // M5 格式化（规格 feature-formatting 范围 7：专属 4 开关；缩进宽度走 FormattingOptions）
   formatting: FormatSwitches;
   maxFormatFileSize: number;
@@ -102,6 +107,8 @@ const DEFAULT_SETTINGS: Settings = {
   dxcPath: '',
   dxcTimeoutMs: 5000,
   maxTypeDiagnosticsPerFile: DEFAULT_MAX_TYPE_DIAGNOSTICS_PER_FILE,
+  // 默认空列表 → 宏集与门槛基线字节相同（feature-dxc-macro-overrides 约束「门槛零漂移」）
+  dxcMacroOverrides: [],
   // 默认值与 `npm run gate:format` 的门槛结果联动（规格 feature-formatting 范围 9）：
   // 门槛 PASS → true；门槛 FAIL → 必须改回 false（server 也就不宣告 documentFormattingProvider）
   formatting: DEFAULT_FORMAT_SWITCHES,
@@ -193,6 +200,7 @@ export function start(): void {
     cgIncludesDir: null,
     packageCacheDir: null,
     editorVersion: null,
+    editorPathSource: 'none',
     degradedReasons: [],
   };
   let indexing = false;
@@ -424,6 +432,19 @@ export function start(): void {
   let typeRuns = 0;
   let lastTypeCounts: TypeCounts | null = null;
 
+  // T-079：用户宏覆盖（feature-dxc-macro-overrides）。解析一次存着，`prepareTypeRun` 直接用；
+  // 缓存键含最终宏串（`macros.join(',')`），列表一变键就变，无需手动清缓存。
+  let macroOverrides: MacroOverrides = EMPTY_OVERRIDES;
+  const syncMacroOverrides = (): void => {
+    macroOverrides = parseMacroOverrides(settings.dxcMacroOverrides ?? []);
+    if ((settings.dxcMacroOverrides ?? []).length > 0) {
+      log(
+        `[type] macro-overrides applied=${macroOverrides.defines.length} ` +
+          `removed=${macroOverrides.removes.size} invalid=${macroOverrides.invalid.length}`
+      );
+    }
+  };
+
   const notifyDxcUnavailable = (detail: string): void => {
     if (dxcState.notified) return; // 一次性提示（规格异常表「客户端一次性明确提示」）
     dxcState.notified = true;
@@ -492,6 +513,7 @@ export function start(): void {
       dxcVersion: dxcState.version,
       includeCtx: includeCtx(),
       disabled: keywords.current.set,
+      macroOverrides,
       tree: state.tree ?? undefined,
       timeoutMs: settings.dxcTimeoutMs,
       maxPerFile: settings.maxTypeDiagnosticsPerFile,
@@ -571,6 +593,7 @@ export function start(): void {
     if (initOpts.settings) settings = { ...DEFAULT_SETTINGS, ...initOpts.settings };
     // 嵌套对象不能靠浅合并（客户端只发部分键会把默认值整块替掉）
     settings.formatting = normalizeFormatSwitches(initOpts.settings?.formatting ?? DEFAULT_SETTINGS.formatting);
+    syncMacroOverrides();
     // 灰化通知只在客户端声明支持时发（规格范围 6：capabilities.experimental 协商）
     const exp = (params.capabilities?.experimental ?? {}) as Record<string, unknown>;
     clientWantsInactive = exp[INACTIVE_REGIONS_NOTIFICATION] === true;
@@ -581,7 +604,7 @@ export function start(): void {
     log(
       `initialized: projectRoot=${env.projectRoot ?? 'null'} editor=${
         env.editorVersion ?? 'null'
-      } degraded=${env.degradedReasons.join(',') || 'no'}`
+      } editor-path-source=${env.editorPathSource} degraded=${env.degradedReasons.join(',') || 'no'}`
     );
     notifyDegraded();
     return {
@@ -626,6 +649,7 @@ export function start(): void {
     const prevDxcPath = settings.dxcPath;
     const prevType = settings.typeDiagnostics;
     const prevFormatEnable = settings.formatting.enable;
+    const prevOverridesKey = JSON.stringify(settings.dxcMacroOverrides ?? []);
     settings = { ...DEFAULT_SETTINGS, ...next };
     settings.formatting = normalizeFormatSwitches(next.formatting ?? DEFAULT_SETTINGS.formatting);
     log(
@@ -647,6 +671,11 @@ export function start(): void {
     if (settings.dxcPath !== prevDxcPath) {
       dxcState.notified = false;
       void resolveDxcTool();
+    }
+    // T-079：覆盖列表变了 → 重解析 + 已打开文档重算（缓存键随宏串自然变化，无需保存）
+    if (JSON.stringify(settings.dxcMacroOverrides ?? []) !== prevOverridesKey) {
+      syncMacroOverrides();
+      for (const file of openUris.keys()) void runTypeDiagnostics(file);
     }
     // 灰化相关设置（轮询间隔 / 窗口 / 防抖）即时生效
     startKeywordPolling();
@@ -929,13 +958,61 @@ export function start(): void {
         state: dxcState.state,
       };
     }
+    // M6a（T-072）变体分析报告：两个命令共用一个实现，**全程只读**（规格范围 10）。
+    // 树复用 docTrees 的缓存（打开文档按树、磁盘文件按 mtime），分析函数自身不 parse。
+    if (params.command === 'unityshader/reportVariants' || params.command === 'unityshader/reportVariantsProject') {
+      const project = params.command === 'unityshader/reportVariantsProject';
+      const args = (params.arguments ?? []) as { uri?: string }[];
+      const file = args[0]?.uri ? uriToFsPath(args[0].uri) : [...openUris.keys()][0];
+      if (!project && !file) return { error: 'no-open-document' };
+      if (project && !env.projectRoot) return { error: 'no-workspace' };
+
+      const targets = project ? [...index.fileNames()].sort() : [file as string];
+      const entries: ReturnType<typeof analyzeVariants> = [];
+      const lines: string[] = [];
+      for (const f of targets) {
+        const trees = docTrees(f, store);
+        if (!trees) continue;
+        const root = trees.labTree?.rootNode ?? trees.hlslTree?.rootNode;
+        if (!root) continue;
+        const es = analyzeVariants(root, f, trees.hlslTree?.rootNode ?? null);
+        entries.push(...es);
+        const worthListing = es.some((e) => e.shaderName !== null || e.groups.length > 0 || e.builtin.length > 0);
+        if (worthListing) for (const e of es) lines.push(variantSummaryLine(e), ...variantDetailLines(e));
+      }
+      const sources = env.projectRoot ? collectMaterialSources(env.projectRoot) : { materials: [], metas: [] };
+      const scan = scanMaterials(sources.materials, sources.metas);
+      // 内置 Legacy Shaders 名单无可读来源（规格不在范围段）→ 显式记 unavailable，不静默给空清单
+      lines.push(`shader-names=indexed=${index.shaderNameCount} builtin-shader-names=unavailable`);
+      lines.push(materialScanLine(scan));
+      const sug = suggestStripping(entries, scan);
+      for (const s of sug.suggestions) {
+        lines.push(`  建议核查 ${s.file}:${s.line} ${s.directive} 未被任何材质使用：${s.unusedKeywords.join(' ')}`);
+      }
+      if (sug.materialEvidence === 'none') {
+        lines.push('  material-evidence=none → 只列组合，不出删除建议（规格范围 8 的门槛）');
+      }
+      for (const l of lines) log(l);
+      return {
+        scope: project ? 'project' : 'file',
+        files: targets.length,
+        shaders: entries.length,
+        shaderNames: index.shaderNameCount,
+        builtinGroups: entries.reduce((n, e) => n + e.builtin.length, 0),
+        materials: { mapped: scan.mapped, unmapped: scan.unmapped, evidence: scan.evidence },
+        suggestions: sug.suggestions.length,
+        lines,
+      };
+    }
     if (params.command === 'unityshader/__indexStats') {
       return {
         pid: process.pid, // 集成测试据此断言进程身份与重启
         files: index.fileCount,
         symbols: index.symbolCount,
+        shaderNames: index.shaderNameCount, // M6a（T-069）：shader 名计数
         indexing, // 集成测试据此等待首轮扫描完成（补全候选依赖包内符号）
         degraded: env.degradedReasons,
+        editorPathSource: env.editorPathSource, // T-073：`editor-path-source=` 五值口径
         includeRoots: includeCtx(),
         // M4：集成测试据此断言防抖与开关行为
         diagnosticsPublished: diagPublishes,
@@ -965,6 +1042,12 @@ export function start(): void {
             timeoutMs: settings.dxcTimeoutMs,
             maxPerFile: settings.maxTypeDiagnosticsPerFile,
             dxcPath: settings.dxcPath,
+          },
+          // T-079：集成测试据此断言覆盖生效与非法条目计数
+          macroOverrides: {
+            applied: macroOverrides.defines.length,
+            removed: macroOverrides.removes.size,
+            invalid: macroOverrides.invalid.length,
           },
           lastCounts: lastTypeCounts,
         },

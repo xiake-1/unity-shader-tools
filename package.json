@@ -26,6 +26,7 @@
     "hlsl:compile": "npm run compile -w hlsl",
     "hlsl:test": "npm run test -w hlsl",
     "gate:format": "node test/corpus/formatGate.mjs",
+    "gate:variants": "node test/corpus/variantsGate.mjs",
     "prebuild": "npm run prebuild -w grammar && npm run prebuild -w hlsl",
     "package": "node scripts/package.mjs"
   },

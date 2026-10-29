@@ -35,6 +35,11 @@ export function createShaderLabParser(): Parser {
   return p;
 }
 
+/** 解析调用计数（测试与门槛脚本的可观测面）。
+ *  规格 feature-shader-name-index-and-variant-report 约束「变体分析不得二次 parse」
+ *  靠它断言：调用前后取增量，分析段的增量必须为 0。 */
+export const parseStats = { shaderlab: 0, hlsl: 0 };
+
 export function createHlslParser(): Parser {
   const p = new Parser();
   p.setLanguage(hlsl);
@@ -44,6 +49,7 @@ export function createHlslParser(): Parser {
 /** 解析 ShaderLab 外壳；提供 oldTree + edits 时走 tree-sitter 增量重解析。
  *  tree-sitter 0.22 的 node 绑定：编辑先写回旧树（tree.edit），再把旧树交给 parse。 */
 export function parseShaderLab(text: string, oldTree?: Tree, edits?: Edit[]): Tree {
+  parseStats.shaderlab++;
   const parser = createShaderLabParser();
   if (oldTree && edits && edits.length > 0) {
     for (const e of edits) oldTree.edit(e as never);
@@ -102,6 +108,7 @@ export function buildVirtualHlsl(text: string, bodies: ProgramBody[]): string {
 /** 解析 .hlsl/.cginc 等独立文件（无 ShaderLab 外壳）。
  *  与 parseShaderLab 一样支持 tree-sitter 增量重解析（M2：打开的 .hlsl 也要能跳）。 */
 export function parseHlslFile(text: string, oldTree?: Tree, edits?: Edit[]): Tree {
+  parseStats.hlsl++;
   const parser = createHlslParser();
   if (oldTree && edits && edits.length > 0) {
     for (const e of edits) oldTree.edit(e as never);
