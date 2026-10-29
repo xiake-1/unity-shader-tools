@@ -64,15 +64,47 @@ copyRel(path.join(root, 'client'), stage, ['package.json', 'dist', 'syntaxes', '
 // 根 LICENSE 进 vsix 根：vsce 据此填 manifest 的 license 面（Marketplace 列表页显示），并消掉 WARNING
 if (fs.existsSync(path.join(root, 'LICENSE'))) fs.copyFileSync(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
 // vsix 的 README 不是仓库根 README：根 README 带 `docs/…` 相对链接，vsce 会因「链接会断」报错。
-// 这里生成一份只含自身说明的短 README（Marketplace 列表页正文就是它）。
+// 这里生成 Marketplace 列表页正文（双语功能清单，口径=server 实际宣告的能力面，不虚报）。
 fs.writeFileSync(
   path.join(stage, 'README.md'),
   '# Unity Shader Tools\n\n' +
-    'Unity ShaderLab（`.shader`）与 HLSL（`.hlsl`/`.hlslinc`）的语言支持：转到定义、补全、改名、悬停、' +
-    '语法诊断、死分支灰化、DXC 类型诊断、格式化。解析走 tree-sitter（自写 ShaderLab grammar + HLSL fork），' +
-    '语言服务是标准 LSP（stdio 子进程），类型诊断调用随扩展附带的官方 `dxc` 预编译产物。\n\n' +
-    '原生件按平台以 N-API prebuilds 随 vsix 附带（win32-x64/arm64、linux-x64/arm64、darwin-x64/arm64）；' +
-    '未覆盖的平台会明确报加载失败，而不是静默失去智能。\n\n' +
+    'Language support for Unity ShaderLab (`.shader`) and HLSL (`.hlsl` / `.hlslinc` / `.cginc`): ' +
+    'tree-sitter parsing (custom ShaderLab grammar + HLSL fork) over a standard LSP server; ' +
+    'type diagnostics run on official `dxc` binaries bundled with the extension — nothing to install.\n\n' +
+    '## Features — ShaderLab (`.shader`)\n' +
+    '- Syntax highlighting (keywords, properties, passes, semantics)\n' +
+    '- Document formatting (idempotent; never rewrites on failure)\n' +
+    '- Go to definition / peek definition — cross-file, follows `#include` (Unity CGIncludes and package paths)\n' +
+    '- Hover definition info (shader names, properties, HLSL symbols; common Unity built-ins via the bundled CGIncludes index)\n' +
+    '- Find all references\n' +
+    '- Rename symbol (shader names, two-step prepare/rename)\n' +
+    '- Completion — shader names in `Fallback` / `UsePass`, `#include` paths, HLSL members after `.`\n' +
+    '- Syntax diagnostics + dead-branch graying for conditional compilation\n' +
+    '- DXC type diagnostics — official `dxc` bundled per platform (win32-x64/arm64, linux-x64, darwin-x64/arm64)\n' +
+    '- Variant count report with material evidence (command palette)\n' +
+    '- Convert language mode command — coexists with Unity for VS Code (VSTU) without touching user settings\n\n' +
+    '## Features — HLSL (`.hlsl` / `.hlslinc` / `.cginc`)\n' +
+    '- Syntax highlighting and formatting\n' +
+    '- Cross-file go to definition, hover, find all references\n' +
+    '- Completion (members after `.`, include paths)\n\n' +
+    'Native modules ship as per-platform N-API prebuilds inside the vsix; unsupported platforms ' +
+    'fail loudly instead of silently losing intelligence.\n\n' +
+    '## 功能 — ShaderLab（`.shader`）\n' +
+    '- 语法高亮（关键字、属性、Pass、语义）\n' +
+    '- 格式化文档（幂等，失败即不改）\n' +
+    '- 转到定义 / 速览定义（跨文件，跟随 `#include`，支持 CGIncludes 与 Unity 包路径）\n' +
+    '- 悬停查看定义（着色器名、属性、HLSL 符号；常见 Unity 内置函数经随包 CGIncludes 索引）\n' +
+    '- 查找所有引用\n' +
+    '- 重命名符号（着色器名，两步流程）\n' +
+    '- 补全（`Fallback`/`UsePass` 着色器名、`#include` 路径、`.` 后的 HLSL 成员）\n' +
+    '- 语法诊断 + 条件编译死分支灰化\n' +
+    '- DXC 类型诊断（按平台附带官方 `dxc`，无需安装）\n' +
+    '- 变体计数报告（含材质证据，命令面板）\n' +
+    '- 转换语言模式命令（与 Unity for VS Code 共存，不改用户设置）\n\n' +
+    '## 功能 — HLSL（`.hlsl` / `.hlslinc` / `.cginc`）\n' +
+    '- 语法高亮与格式化\n' +
+    '- 跨文件转到定义、悬停、查找所有引用\n' +
+    '- 补全（`.` 后成员、include 路径）\n\n' +
     '源码与问题反馈：https://github.com/xiake-1/unity-shader-tools\n',
   'utf8'
 );

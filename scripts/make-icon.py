@@ -1,7 +1,9 @@
-# 生成扩展 icon（256x256 PNG）：深色底 + 青→品红渐变着色球 + 高亮与经纬线。
+# 生成扩展 icon（256x256 PNG）v2：深色底 + Unity 风格圆环三弦 Y 标 + 「Shader」字样。
 # 一次性资产脚本：产物 client/images/icon.png 入库（Marketplace 列表图标）。
+# v1（着色球）保留在 git 历史里。
 import math
-from PIL import Image, ImageDraw
+import os
+from PIL import Image, ImageDraw, ImageFont
 
 S = 256
 img = Image.new("RGB", (S, S))
@@ -9,64 +11,61 @@ px = img.load()
 
 # 背景：深色 + 轻微径向提亮
 bg_a, bg_b = (22, 27, 38), (34, 42, 60)
-cx0, cy0 = S / 2, S * 0.46
+cx0, cy0 = S / 2, S * 0.44
 for y in range(S):
     for x in range(S):
         d = math.hypot(x - cx0, y - cy0) / (S * 0.75)
         t = max(0.0, 1.0 - d)
-        r = int(bg_a[0] + (bg_b[0] - bg_a[0]) * t)
-        g = int(bg_a[1] + (bg_b[1] - bg_a[1]) * t)
-        b = int(bg_a[2] + (bg_b[2] - bg_a[2]) * t)
-        px[x, y] = (r, g, b)
-
-# 着色球：中心 (128,120)，半径 78；颜色 = 水平渐变（青→品红），亮度 = 球面光照
-R, BCX, BCY = 78, 128, 120
-c1, c2 = (34, 211, 238), (232, 121, 249)  # cyan → fuchsia
-lx, ly, lz = -0.55, -0.60, 0.58  # 光源方向（左上前方）
-ln = math.sqrt(lx * lx + ly * ly + lz * lz)
-lx, ly, lz = lx / ln, ly / ln, lz / ln
-for y in range(BCY - R, BCY + R + 1):
-    for x in range(BCX - R, BCX + R + 1):
-        dx, dy = (x - BCX) / R, (y - BCY) / R
-        d2 = dx * dx + dy * dy
-        if d2 > 1.0:
-            continue
-        dz = math.sqrt(1.0 - d2)
-        t = (dx + 1.0) / 2.0  # 水平渐变参数
-        cr = c1[0] + (c2[0] - c1[0]) * t
-        cg = c1[1] + (c2[1] - c1[1]) * t
-        cb = c1[2] + (c2[2] - c1[2]) * t
-        diff = max(0.0, dx * lx + dy * ly + dz * lz)
-        shade = 0.32 + 0.68 * diff
-        # 边缘压暗（菲涅尔近似）
-        fres = 0.75 + 0.25 * dz
-        r = min(255, int(cr * shade * fres))
-        g = min(255, int(cg * shade * fres))
-        b = min(255, int(cb * shade * fres))
-        # 镜面高光
-        spec = max(0.0, dz * 2 - 1.0)
-        hx, hy = dx + 0.42, dy + 0.45
-        h = math.exp(-(hx * hx + hy * hy) * 9.0) * 120 * dz
-        r = min(255, int(r + h))
-        g = min(255, int(g + h))
-        b = min(255, int(b + h))
-        px[x, y] = (r, g, b)
+        px[x, y] = (
+            int(bg_a[0] + (bg_b[0] - bg_a[0]) * t),
+            int(bg_a[1] + (bg_b[1] - bg_a[1]) * t),
+            int(bg_a[2] + (bg_b[2] - bg_a[2]) * t),
+        )
 
 draw = ImageDraw.Draw(img)
-# 经纬线（着色器球体的暗示）：两条纬线 + 一条中央经线，低对比
-for k in (-0.45, 0.45):
-    ry = BCY + k * R
-    rx = math.sqrt(max(0.0, 1 - k * k)) * R
-    draw.ellipse([BCX - rx, ry - rx * 0.16, BCX + rx, ry + rx * 0.16], outline=(255, 255, 255, 40), width=2)
-draw.ellipse([BCX - R * 0.28, BCY - R, BCX + R * 0.28, BCY + R], outline=(255, 255, 255, 36), width=2)
 
-# 底部接地阴影
-sh = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-ImageDraw.Draw(sh).ellipse([BCX - R * 0.9, BCY + R * 1.02, BCX + R * 0.9, BCY + R * 1.28], fill=(0, 0, 0, 70))
-img = Image.alpha_composite(img.convert("RGBA"), sh).convert("RGB")
+# Unity 风格标记：圆环 + 字母 Y 三弦（两臂向上、一臂向下），臂端留缺口不触环
+# （和平标志的读法来自「臂触环 + 一臂向上」，Unity 标是 Y 形 + 缺口）
+MCX, MCY, MR = 128, 104, 66
+ring = 11
+draw.ellipse([MCX - MR, MCY - MR, MCX + MR, MCY + MR], outline=(245, 247, 250), width=ring)
+arm = 15
+tip = 0.82  # 臂端停在环内 82% 半径处，留可见缺口
 
-import os
-os.makedirs(os.path.join(os.path.dirname(__file__), "..", "client", "images"), exist_ok=True)
+
+def cap(x, y, r, color):
+    draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
+
+
+for ang in (-150, -30, 90):  # 左上、右上、下（字母 Y）
+    a = math.radians(ang)
+    ex, ey = MCX + MR * tip * math.cos(a), MCY + MR * tip * math.sin(a)
+    draw.line([MCX, MCY, ex, ey], fill=(245, 247, 250), width=arm)
+    cap(ex, ey, arm / 2 - 1, (245, 247, 250))
+cap(MCX, MCY, arm / 2 + 2, (245, 247, 250))  # 中心圆帽，让三臂衔接圆润
+
+# 前景：「Shader」字样（青色，粗体）
+font = None
+for cand in ("arialbd.ttf", "segoeui-bold.ttf", "arial.ttf"):
+    p = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", cand)
+    if os.path.exists(p):
+        font = ImageFont.truetype(p, 52)
+        break
+if font is None:
+    font = ImageFont.load_default()
+text = "Shader"
+col = (56, 214, 240)
+tb = draw.textbbox((0, 0), text, font=font)
+tw, th = tb[2] - tb[0], tb[3] - tb[1]
+tx, ty = (S - tw) / 2 - tb[0], 196 - tb[1]
+# 深色描边保证小尺寸可读
+for dx in (-2, 0, 2):
+    for dy in (-2, 0, 2):
+        if dx or dy:
+            draw.text((tx + dx, ty + dy), text, font=font, fill=(10, 14, 22))
+draw.text((tx, ty), text, font=font, fill=col)
+
 out = os.path.join(os.path.dirname(__file__), "..", "client", "images", "icon.png")
+os.makedirs(os.path.dirname(out), exist_ok=True)
 img.save(out, "PNG")
 print("wrote", out, img.size)
