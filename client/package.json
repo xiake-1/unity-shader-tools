@@ -4,8 +4,13 @@
   "description": "Unity .shader/.hlsl language support (tree-sitter + LSP)",
   "version": "0.0.1",
   "private": true,
-  "publisher": "selfbuilt",
+  "publisher": "xiake-1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiake-1/unity-shader-tools"
+  },
+  "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.95.0"
   },

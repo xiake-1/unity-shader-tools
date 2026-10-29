@@ -59,16 +59,20 @@ fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(path.join(stage, 'node_modules'), { recursive: true });
 
 // 1) 扩展本体（client 是 vsix 的清单所在）
-copyRel(path.join(root, 'client'), stage, ['package.json', 'dist', 'syntaxes', 'snippets', 'language-configuration.json', '.vscodeignore']);
-// vsix 的 README 不是仓库根 README：根 README 带 `docs/…` 相对链接，vsce 在没有
-// repository URL 时会因「链接会断」直接报错。这里生成一份只含自身说明的短 README。
+copyRel(path.join(root, 'client'), stage, ['package.json', 'dist', 'syntaxes', 'snippets', 'language-configuration.json', '.vscodeignore', 'images']);
+// 根 LICENSE 进 vsix 根：vsce 据此填 manifest 的 license 面（Marketplace 列表页显示），并消掉 WARNING
+if (fs.existsSync(path.join(root, 'LICENSE'))) fs.copyFileSync(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
+// vsix 的 README 不是仓库根 README：根 README 带 `docs/…` 相对链接，vsce 会因「链接会断」报错。
+// 这里生成一份只含自身说明的短 README（Marketplace 列表页正文就是它）。
 fs.writeFileSync(
   path.join(stage, 'README.md'),
-  '# Unity Shader Tools（自建）\n\n' +
+  '# Unity Shader Tools\n\n' +
     'Unity ShaderLab（`.shader`）与 HLSL（`.hlsl`/`.hlslinc`）的语言支持：转到定义、补全、改名、悬停、' +
     '语法诊断、死分支灰化、DXC 类型诊断、格式化。解析走 tree-sitter（自写 ShaderLab grammar + HLSL fork），' +
     '语言服务是标准 LSP（stdio 子进程），类型诊断调用随扩展附带的官方 `dxc` 预编译产物。\n\n' +
-    '原生件按 ADR 0005 以 N-API prebuilds 随 vsix 附带；未覆盖的平台会明确报加载失败，而不是静默失去智能。\n',
+    '原生件按平台以 N-API prebuilds 随 vsix 附带（win32-x64/arm64、linux-x64/arm64、darwin-x64/arm64）；' +
+    '未覆盖的平台会明确报加载失败，而不是静默失去智能。\n\n' +
+    '源码与问题反馈：https://github.com/xiake-1/unity-shader-tools\n',
   'utf8'
 );
 
