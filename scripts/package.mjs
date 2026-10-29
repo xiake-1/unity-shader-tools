@@ -63,32 +63,14 @@ fs.mkdirSync(path.join(stage, 'node_modules'), { recursive: true });
 copyRel(path.join(root, 'client'), stage, ['package.json', 'dist', 'syntaxes', 'snippets', 'language-configuration.json', '.vscodeignore', 'images']);
 // 根 LICENSE 进 vsix 根：vsce 据此填 manifest 的 license 面（Marketplace 列表页显示），并消掉 WARNING
 if (fs.existsSync(path.join(root, 'LICENSE'))) fs.copyFileSync(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
-// vsix 的 README 不是仓库根 README：根 README 带 `docs/…` 相对链接，vsce 会因「链接会断」报错。
-// 这里生成 Marketplace 列表页正文（双语功能清单，口径=server 实际宣告的能力面，不虚报）。
+// vsix 的 README 不是仓库根 README：根 README 带 `README.en.md` 等相对链接，vsce 会因「链接会断」报错。
+// 这里生成 Marketplace 列表页正文（双语功能清单，中文在前；口径=server 实际宣告的能力面，不虚报）。
 fs.writeFileSync(
   path.join(stage, 'README.md'),
   '# Unity Shader Tools\n\n' +
-    'Language support for Unity ShaderLab (`.shader`) and HLSL (`.hlsl` / `.hlslinc` / `.cginc`): ' +
-    'tree-sitter parsing (custom ShaderLab grammar + HLSL fork) over a standard LSP server; ' +
-    'type diagnostics run on official `dxc` binaries bundled with the extension — nothing to install.\n\n' +
-    '## Features — ShaderLab (`.shader`)\n' +
-    '- Syntax highlighting (keywords, properties, passes, semantics)\n' +
-    '- Document formatting (idempotent; never rewrites on failure)\n' +
-    '- Go to definition / peek definition — cross-file, follows `#include` (Unity CGIncludes and package paths)\n' +
-    '- Hover definition info (shader names, properties, HLSL symbols; common Unity built-ins via the bundled CGIncludes index)\n' +
-    '- Find all references\n' +
-    '- Rename symbol (shader names, two-step prepare/rename)\n' +
-    '- Completion — shader names in `Fallback` / `UsePass`, `#include` paths, HLSL members after `.`\n' +
-    '- Syntax diagnostics + dead-branch graying for conditional compilation\n' +
-    '- DXC type diagnostics — official `dxc` bundled per platform (win32-x64/arm64, linux-x64, darwin-x64/arm64)\n' +
-    '- Variant count report with material evidence (command palette)\n' +
-    '- Convert language mode command — coexists with Unity for VS Code (VSTU) without touching user settings\n\n' +
-    '## Features — HLSL (`.hlsl` / `.hlslinc` / `.cginc`)\n' +
-    '- Syntax highlighting and formatting\n' +
-    '- Cross-file go to definition, hover, find all references\n' +
-    '- Completion (members after `.`, include paths)\n\n' +
-    'Native modules ship as per-platform N-API prebuilds inside the vsix; unsupported platforms ' +
-    'fail loudly instead of silently losing intelligence.\n\n' +
+    '为 Unity 开发者打造的 VSCode 插件：让 `.shader` / `.hlsl` 文件拥有完整的语言智能——转到定义、补全、重命名、悬停、' +
+    '语法与类型诊断、格式化。解析采用自研 tree-sitter ShaderLab 语法与 HLSL 方言支持，类型检查调用随扩展附带的官方 `dxc`' +
+    ' 编译器——开箱即用，无需安装任何外部工具。\n\n' +
     '## 功能 — ShaderLab（`.shader`）\n' +
     '- 语法高亮（关键字、属性、Pass、语义）\n' +
     '- 格式化文档（幂等，失败即不改）\n' +
@@ -105,6 +87,28 @@ fs.writeFileSync(
     '- 语法高亮与格式化\n' +
     '- 跨文件转到定义、悬停、查找所有引用\n' +
     '- 补全（`.` 后成员、include 路径）\n\n' +
+    '原生组件按平台随 vsix 附带（win32-x64/arm64、linux-x64/arm64、darwin-x64/arm64）；' +
+    '未覆盖的平台会明确报加载失败，而不是静默失去智能。\n\n' +
+    '---\n\n' +
+    'A VSCode extension for Unity developers: full language intelligence for `.shader` / `.hlsl` files — ' +
+    'go to definition, completion, rename, hover, syntax & type diagnostics, and formatting. ' +
+    'Type checking calls the official `dxc` compiler bundled with the extension — nothing else to install.\n\n' +
+    '## Features — ShaderLab (`.shader`)\n' +
+    '- Syntax highlighting (keywords, properties, passes, semantics)\n' +
+    '- Document formatting (idempotent; never rewrites on failure)\n' +
+    '- Go to definition / peek definition — cross-file, follows `#include` (Unity CGIncludes and package paths)\n' +
+    '- Hover definition info (shader names, properties, HLSL symbols; common Unity built-ins via the bundled CGIncludes index)\n' +
+    '- Find all references\n' +
+    '- Rename symbol (shader names, two-step prepare/rename)\n' +
+    '- Completion — shader names in `Fallback` / `UsePass`, `#include` paths, HLSL members after `.`\n' +
+    '- Syntax diagnostics + dead-branch graying for conditional compilation\n' +
+    '- DXC type diagnostics — official `dxc` bundled per platform (win32-x64/arm64, linux-x64, darwin-x64/arm64)\n' +
+    '- Variant count report with material evidence (command palette)\n' +
+    '- Convert language mode command — coexists with Unity for VS Code (VSTU) without touching user settings\n\n' +
+    '## Features — HLSL (`.hlsl` / `.hlslinc` / `.cginc`)\n' +
+    '- Syntax highlighting and formatting\n' +
+    '- Cross-file go to definition, hover, find all references\n' +
+    '- Completion (members after `.`, include paths)\n\n' +
     '源码与问题反馈：https://github.com/xiake-1/unity-shader-tools\n',
   'utf8'
 );
