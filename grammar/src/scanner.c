@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <string.h>
+#include <wctype.h> /* iswspace: clang (macOS) errors on implicit declarations under C99+ */
 
 /* Order must match the externals array in grammar.js exactly. */
 typedef enum {
