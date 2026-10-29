@@ -1,6 +1,7 @@
 # 打包期排除项（vsce）。注意：`scripts/package.mjs` 会在暂存目录里放**运行时依赖闭包**
-# （server 不 bundle，`node-gyp-build` 靠 `__dirname` 找 prebuilds，见 ADR 0005），
-# 所以这里**不能**忽略 `node_modules/**`；只排除开发期文件。
+# （server 不 bundle，`node-gyp-build` 靠 `__dirname` 找 prebuilds，见 ADR 0005）。
+# **node_modules 不经过这里**：`vsce --no-dependencies` 在文件收集层硬编码排除 node_modules
+# （反排除规则也救不回来），依赖闭包由 package.mjs 打包后用 zip 追加步写进 vsix（见其 5b 段）。
 src/**
 tsconfig.json
 **/*.ts

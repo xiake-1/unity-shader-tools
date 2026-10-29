@@ -103,6 +103,15 @@ jobs:
       - run: npm test
       - name: 打包 vsix 并打印体积口径
         run: node scripts/package.mjs | tee package-report.json
+      # 发布产物自检：解包 vsix，实跑依赖闭包（Linux 上顺带验证 linux-x64 prebuilds 可加载）。
+      # 背景：vsce --no-dependencies 曾把暂存 node_modules 整个排除在包外（2026-10-29 实测），
+      # 只报体积口径发现不了——必须解包 require 才算数。
+      - name: vsix 冒烟（解包后依赖闭包可加载）
+        run: |
+          rm -rf .vsix-smoke && mkdir -p .vsix-smoke
+          unzip -q dist-vsix/unity-shader-tools.vsix -d .vsix-smoke
+          node scripts/vsix-smoke.cjs .vsix-smoke/extension
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: vsix

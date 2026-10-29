@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import JSZip from 'jszip';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -121,6 +122,30 @@ if (!fs.existsSync(vsix)) {
   const produced = path.join(stage, vsixName);
   if (fs.existsSync(produced)) fs.renameSync(produced, vsix);
 }
+
+// 5b) 把暂存的 node_modules 依赖闭包**补写进 vsix**。
+// vsce 的 `--no-dependencies` 会把文件收集退化为 `glob('**', cwd=stage, ignore:['node_modules/**'])`
+// （vsce/out/npm.js getDependencies('none') 只返回 cwd；out/package.js collectAllFiles 硬编码排除），
+// `.vscodeignore` 的反排除规则救不回来——2026-10-29 上架前实测：本地与 CI 的 vsix 都只有 5x 个文件、
+// 零 node_modules，装上必 `Cannot find module`。vsix 就是 zip，打包后按 ADR 0005 的暂存闭包补进去。
+const zip = await JSZip.loadAsync(fs.readFileSync(vsix));
+const nmStage = path.join(stage, 'node_modules');
+let appended = 0;
+const appendWalk = (dir, rel) => {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) appendWalk(abs, r);
+    else if (!/\.(ts|map)$/.test(e.name)) {
+      zip.file(`extension/node_modules/${r}`, fs.readFileSync(abs));
+      appended++;
+    }
+  }
+};
+if (fs.existsSync(nmStage)) appendWalk(nmStage, '');
+fs.writeFileSync(vsix, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+process.stdout.write(`appended ${appended} node_modules files into vsix\n`);
+
 const size = fs.statSync(vsix).size;
 const mb = (n) => (n / 1024 / 1024).toFixed(2) + ' MB';
 
