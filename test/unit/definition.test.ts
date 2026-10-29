@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import type { Location } from 'vscode-languageserver';
 
 import { SymbolIndex } from '../../server/out/symbolIndex.js';
@@ -145,7 +145,7 @@ const uri = (p: string): string => pathToFileURL(p).toString();
 
 /** 取 Location 指向的原文片段，用来断言「落在名字本身而不是整条声明」 */
 function textAt(loc: Location): string {
-  const file = loc.uri.replace(/^file:\/\/\/?([a-zA-Z]:)/, '$1').replace(/\//g, path.sep);
+  const file = fileURLToPath(loc.uri); // 跨平台：Windows 盘符与 POSIX 路径都走标准解码
   const text = fs.readFileSync(file, 'utf8');
   const lines = text.split('\n');
   const l = lines[loc.range.start.line] ?? '';

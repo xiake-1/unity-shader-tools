@@ -1,5 +1,8 @@
 /** T-037～T-039：语法诊断计算（规格 feature-syntax-diagnostics 的 vitest 侧验收） */
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { DiagnosticSeverity } from 'vscode-languageserver';
 import {
   computeFileDiagnostics,
@@ -97,16 +100,24 @@ describe('T-039 include 未找到 Warning', () => {
   });
 
   it('解析成功的 include 零诊断（内置 CGIncludes 命中）', () => {
-    const ctx = {
-      projectRoot: 'D:/Work/Unity/ShaderStudy',
-      cgIncludesDir: 'D:/Soft/Work/Unity/UnityEditor/2022.3.62f3c1/Editor/Data/CGIncludes',
-      packageCacheDir: 'D:/Work/Unity/ShaderStudy/Library/PackageCache',
-    };
-    const r = computeFileDiagnostics(HL('#include "UnityCG.cginc"\n#include "Lighting.cginc"\n'), {
-      includeCtx: ctx,
-      file: 'D:/Work/Unity/ShaderStudy/Assets/x.hlsl',
-    });
-    expect(r.diagnostics.length).toBe(0);
+    // 夹具自包含：临时目录放两个 .cginc，不依赖本机 Unity 安装（CI Linux 上没有 D:/ 路径）
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cginc-fixture-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'UnityCG.cginc'), 'float4 mul(float4 a, float4 b);\n', 'utf8');
+      fs.writeFileSync(path.join(dir, 'Lighting.cginc'), 'float4 LightingSimple(float4 c);\n', 'utf8');
+      const ctx = {
+        projectRoot: 'D:/Work/Unity/ShaderStudy',
+        cgIncludesDir: dir,
+        packageCacheDir: 'D:/Work/Unity/ShaderStudy/Library/PackageCache',
+      };
+      const r = computeFileDiagnostics(HL('#include "UnityCG.cginc"\n#include "Lighting.cginc"\n'), {
+        includeCtx: ctx,
+        file: 'D:/Work/Unity/ShaderStudy/Assets/x.hlsl',
+      });
+      expect(r.diagnostics.length).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('降级态：include 未找到不产、语法诊断照常产，日志记 degraded=skip-include-diag', () => {

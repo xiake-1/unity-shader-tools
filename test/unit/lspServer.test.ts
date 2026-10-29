@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { pathToFileURL } from 'url';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -115,7 +116,7 @@ beforeAll(async () => {
     rootUri: null,
     workspaceFolders: [],
     capabilities: {},
-    initializationOptions: { activeFile: `file:///${shaderFile.replace(/\\/g, '/')}`, settings: { index: false } },
+    initializationOptions: { activeFile: pathToFileURL(shaderFile).href, settings: { index: false } },
   })) as { capabilities: { textDocumentSync?: number } };
   client.notify('initialized', {});
 });
@@ -194,7 +195,7 @@ describe('LSP 生命周期（真实 stdio）', () => {
       '',
     ].join('\n');
     fs.writeFileSync(messy, text, 'utf8');
-    const uri = `file:///${messy.replace(/\\/g, '/')}`;
+    const uri = pathToFileURL(messy).href;
     client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'unityshader', version: 1, text } });
     const edits = (await client.request('textDocument/formatting', {
       textDocument: { uri },
@@ -222,7 +223,7 @@ describe('LSP 生命周期（真实 stdio）', () => {
 
   it('didOpen 后索引到符号，executeCommand 可查统计', async () => {
     client.notify('textDocument/didOpen', {
-      textDocument: { uri: `file:///${shaderFile.replace(/\\/g, '/')}`, languageId: 'unityshader', version: 1, text: fs.readFileSync(shaderFile, 'utf8') },
+      textDocument: { uri: pathToFileURL(shaderFile).href, languageId: 'unityshader', version: 1, text: fs.readFileSync(shaderFile, 'utf8') },
     });
     const stats = (await client.request('workspace/executeCommand', {
       command: 'unityshader/__indexStats',
@@ -233,18 +234,18 @@ describe('LSP 生命周期（真实 stdio）', () => {
   });
 
   it('非 Unity 目录：降级提示恰好一次，且不崩溃', async () => {
-    const msgs = client.notifications.filter(
-      (n) => n.method === 'window/showMessageRequest'
-    );
-    expect(msgs.length).toBe(1);
-    const p = msgs[0].params as { type: number; message: string };
-    expect(p.type).toBe(3); // Information
-    expect(p.message).toContain('未识别到完整 Unity 工程');
+    const msgs = client.notifications.filter((n) => n.method === 'window/showMessageRequest');
+    // 按内容钉「降级提示」本身恰好一次；其它弹窗（如 dxc 不可用提示）不在这条断言口径内，
+    // 但失败时把全部消息打出来，便于定位多出来的那条是什么。
+    const texts = msgs.map((n) => (n.params as { message?: string }).message ?? '');
+    const degraded = msgs.filter((n) => ((n.params as { message?: string }).message ?? '').includes('未识别到完整 Unity 工程'));
+    expect(degraded.length, `实际弹窗消息=${JSON.stringify(texts)}`).toBe(1);
+    expect((degraded[0].params as { type: number }).type).toBe(3); // Information
     expect(proc.exitCode).toBeNull();
   });
 
   it('T-019 降级态：工程内符号可跳、内置符号返回空、弹窗仍只一次', async () => {
-    const uri = `file:///${shaderFile.replace(/\\/g, '/')}`;
+    const uri = pathToFileURL(shaderFile).href;
     const text = fs.readFileSync(shaderFile, 'utf8');
     const at = (needle: string, offset = 0) => {
       const i = text.indexOf(needle) + offset;
@@ -264,13 +265,19 @@ describe('LSP 生命周期（真实 stdio）', () => {
     })) as unknown[] | null;
     expect(builtin === null || builtin.length === 0, '内置符号在降级态应返回空而不是报错').toBe(true);
 
-    // 降级提示仍然只有一条：definition 不产生新的弹窗
-    expect(client.notifications.filter((n) => n.method === 'window/showMessageRequest')).toHaveLength(1);
+    // 降级提示仍然只有一条：definition 不产生新的弹窗（按内容过滤，口径同上）
+    const texts = client.notifications
+      .filter((n) => n.method === 'window/showMessageRequest')
+      .map((n) => (n.params as { message?: string }).message ?? '');
+    expect(
+      texts.filter((t) => t.includes('未识别到完整 Unity 工程')).length,
+      `实际弹窗消息=${JSON.stringify(texts)}`
+    ).toBe(1);
     expect(proc.exitCode).toBeNull();
   });
 
   it('增量 didChange 后符号表更新', async () => {
-    const uri = `file:///${shaderFile.replace(/\\/g, '/')}`;
+    const uri = pathToFileURL(shaderFile).href;
     client.notify('textDocument/didChange', {
       textDocument: { uri, version: 2 },
       contentChanges: [
