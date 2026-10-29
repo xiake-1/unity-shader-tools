@@ -35,3 +35,6 @@ package-report.json
 third_party/dxc/**/dxc
 
 .vsix-e2e/
+
+# 内部文档（含竞品逆向分析），不入库
+docs/
