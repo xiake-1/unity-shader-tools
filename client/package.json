@@ -10,6 +10,7 @@
     "type": "git",
     "url": "https://github.com/xiake-1/unity-shader-tools"
   },
+  "changelog": "CHANGELOG.md",
   "icon": "images/icon.png",
   "engines": {
     "vscode": "^1.95.0"
