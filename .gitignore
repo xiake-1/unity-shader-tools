@@ -31,6 +31,7 @@ dist-vsix/
 .ci-prebuilds/
 package-report.json
 .vsix-smoke/
+.vsix-smoke2/
 # Linux 下的 dxc 无扩展名，上面的 *.exe/*.dll/*.so 兜不住（ADR 0010：下载物不入库）
 third_party/dxc/**/dxc
 
