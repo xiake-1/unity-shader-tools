@@ -1,13 +1,16 @@
 /**
- * T-060 格式化配置面（规格 feature-formatting 范围 7）。
+ * T-060 / T-084 格式化配置面（规格 feature-formatting 范围 9）。
  *
- * 分工经用户确认：**专属 4 开关**在这里归一；**缩进宽度与空格来源不重复造轮子** ——
+ * 分工经用户确认：**专属 6 开关**在这里归一；**缩进宽度与空格来源不重复造轮子** ——
  * 直接取 LSP `FormattingOptions`（VSCode 按 `[unityshader]` / `[hlsl]` 作用域算好的
  * `editor.tabSize` / `editor.insertSpaces`）。
+ *
+ * 只有 `enable` 改值需要重载窗口（能力在 `initialize` 定死）；其余 5 项经
+ * `workspace/didChangeConfiguration` 热更生效（规格范围 9 与异常表）。
  */
 
 export interface FormatSwitches {
-  /** 关掉 → server 不宣告 `documentFormattingProvider`（范围 9；改值需重载窗口，约束） */
+  /** 关掉 → server 不宣告 `documentFormattingProvider`（范围 11；改值需重载窗口，约束） */
   enable: boolean;
   /** HLSL 函数/控制流左括号位置（范围 6）。默认同行 */
   braceOnNewLine: boolean;
@@ -15,33 +18,40 @@ export interface FormatSwitches {
   macroMatchIndent: boolean;
   /** 连续空行折叠上限，0–2（范围 6 + 异常表） */
   keepBlankLines: number;
+  /** 行内空白规范化四类（范围 7）。默认开（覆盖率探针见 log 2026-10-30 07:41） */
+  intraLineSpacing: boolean;
+  /** 拆行尾 `}`（范围 8）。默认开 */
+  braceSplitting: boolean;
 }
 
 export const DEFAULT_FORMAT_SWITCHES: FormatSwitches = {
-  // 默认值与 `npm run gate:format` 的门槛结果联动（范围 9）：PASS → true；FAIL → 必须改回 false
+  // 默认值与 `npm run gate:format` 的门槛结果联动（范围 11）：PASS → true；FAIL → 必须改回 false
   enable: true,
   braceOnNewLine: false,
   macroMatchIndent: true,
   keepBlankLines: 1,
+  intraLineSpacing: true,
+  braceSplitting: true,
 };
 
 /** 归一 + 夹紧：配置面是用户输入，越界值夹紧而不是抛错（规格约束：格式化不产诊断） */
 export function normalizeFormatSwitches(raw: unknown): FormatSwitches {
   const r = (raw ?? {}) as Record<string, unknown>;
   const keep = Number(r.keepBlankLines ?? DEFAULT_FORMAT_SWITCHES.keepBlankLines);
+  const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d);
   return {
-    enable: typeof r.enable === 'boolean' ? r.enable : DEFAULT_FORMAT_SWITCHES.enable,
-    braceOnNewLine:
-      typeof r.braceOnNewLine === 'boolean' ? r.braceOnNewLine : DEFAULT_FORMAT_SWITCHES.braceOnNewLine,
-    macroMatchIndent:
-      typeof r.macroMatchIndent === 'boolean'
-        ? r.macroMatchIndent
-        : DEFAULT_FORMAT_SWITCHES.macroMatchIndent,
-    keepBlankLines: Number.isFinite(keep) ? Math.max(0, Math.min(2, Math.trunc(keep))) : DEFAULT_FORMAT_SWITCHES.keepBlankLines,
+    enable: bool(r.enable, DEFAULT_FORMAT_SWITCHES.enable),
+    braceOnNewLine: bool(r.braceOnNewLine, DEFAULT_FORMAT_SWITCHES.braceOnNewLine),
+    macroMatchIndent: bool(r.macroMatchIndent, DEFAULT_FORMAT_SWITCHES.macroMatchIndent),
+    keepBlankLines: Number.isFinite(keep)
+      ? Math.max(0, Math.min(2, Math.trunc(keep)))
+      : DEFAULT_FORMAT_SWITCHES.keepBlankLines,
+    intraLineSpacing: bool(r.intraLineSpacing, DEFAULT_FORMAT_SWITCHES.intraLineSpacing),
+    braceSplitting: bool(r.braceSplitting, DEFAULT_FORMAT_SWITCHES.braceSplitting),
   };
 }
 
-/** 缩进来自 LSP `FormattingOptions`（范围 7）：`tabSize` / `insertSpaces` */
+/** 缩进来自 LSP `FormattingOptions`（范围 9）：`tabSize` / `insertSpaces` */
 export interface IndentOptions {
   tabSize: number;
   insertSpaces: boolean;

@@ -10,7 +10,9 @@ the official `dxc` compiler bundled with the extension — works out of the box,
 ## Features — ShaderLab (`.shader`)
 
 - Syntax highlighting (keywords, properties, passes, semantics)
-- Document formatting (idempotent; never rewrites on failure)
+- Document formatting (idempotent; never rewrites on failure) — ShaderLab shell plus
+  `CGPROGRAM` / `HLSLPROGRAM` / `GLSLPROGRAM` bodies re-indented by block depth; intra-line whitespace
+  normalization and trailing-`}` splitting (each with its own switch)
 - Go to definition / peek definition — cross-file, follows `#include` (Unity CGIncludes and package paths)
 - Hover definition info (shader names, properties, HLSL symbols; common Unity built-ins via the bundled CGIncludes index)
 - Find all references
@@ -23,7 +25,7 @@ the official `dxc` compiler bundled with the extension — works out of the box,
 
 ## Features — HLSL (`.hlsl` / `.hlslinc` / `.cginc`)
 
-- Syntax highlighting and formatting
+- Syntax highlighting and formatting (`.cginc` files are formatted end-to-end as well)
 - Cross-file go to definition, hover, find all references
 - Completion (members after `.`, include paths)
 

@@ -1,19 +1,22 @@
 /**
- * T-059 / T-061 / T-062 格式化编排：ShaderLab 外壳打印器 + 原样输出区判定 + 失败即不改。
+ * T-059 / T-061 / T-062 / T-080 / T-081 / T-082 格式化编排：
+ * ShaderLab 外壳打印器 + program 区域（HLSL / CG / GLSL）判定 + 原样输出区 + 失败即不改。
  *
- * 规格的三条硬断言（范围 8）在这里**每次都复验**，任一不满足整次返回 `null`（范围 10）：
- * ① 幂等（对输出再排一次字节相同）；② token 序列不变（同一 grammar 重新解析后的叶子 token 逐项相同）；
- * ③ 仅空白变化（逐行 strip 空白后与原文逐行相同；`braceOnNewLine` 会把 `{` 换行，此时 ③ 不适用，
- *    由 ② 兜底 —— 门槛按默认配置跑，`braceOnNewLine=false`）。
+ * 硬断言在这里**每次都复验**，任一不满足整次返回 `null`（范围 12）：
+ * ① 幂等（对输出再排一次字节相同）；② token 序列不变（同一 grammar 重新解析后的叶子 token
+ * 的 type 与 text 逐项相同）—— 扩范围后的**主判据**；
+ * ③ 仅空白变化（**新口径**）：`intraLineSpacing` / `braceSplitting` / `braceOnNewLine` 任一开时
+ *    行数与行内容允许变化，由 ② + 输出形状自检（`outputShapeViolations`）兜底；
+ *    三个开关全关时仍走旧的「逐行 strip 后逐行相同」口径。
  */
 import * as fs from 'fs';
 import { parseShaderLab, parseHlslFile, type Tree, type SyntaxNode } from './parser';
-import { isCgSource, isGeneratedFile } from './tempFiles';
-import { buildLineModel, printHlslRegion } from './hlslPrinter';
-import { indentPrefix, DEFAULT_FORMAT_SWITCHES, type FormatSwitches, type IndentOptions } from './formatSettings';
+import { isGeneratedFile } from './tempFiles';
+import { buildLineModel, printHlslRegion, emitFormattedLine } from './hlslPrinter';
+import { DEFAULT_FORMAT_SWITCHES, type FormatSwitches, type IndentOptions } from './formatSettings';
 import { ExemptionTable, contextOf } from './errorExemption';
 
-/** 默认大文件上限（范围 11） */
+/** 默认大文件上限（范围 13） */
 export const DEFAULT_MAX_FORMAT_FILE_SIZE = 1024 * 1024;
 
 export interface FormatRequest {
@@ -29,7 +32,7 @@ export interface FormatRequest {
 }
 
 export interface FormatOutcome {
-  /** `null` = 不改文档（范围 10 + 异常表） */
+  /** `null` = 不改文档（范围 12 + 异常表） */
   text: string | null;
   /** 为什么没改 / 为什么失败（写进日志 `format-error=` 或 `format=`） */
   reason: string | null;
@@ -37,33 +40,46 @@ export interface FormatOutcome {
   changedBytes: number;
   /** 原样区行数（健康行与门槛用） */
   verbatimLines: number;
+  /** CG/GLSL 区域与 `.cginc` 实际排版字节（范围 14 健康行 `cg=`） */
+  cgBytes: number;
 }
 
 const HLSL_EXT = /\.(hlsl|hlslinc)$/i;
+const CGINC_EXT = /\.cginc$/i;
+const HLSL_DIALECT_EXT = /\.(hlsl|hlslinc|cginc)$/i;
 
 export function isHlslSource(fsPath: string): boolean {
   return HLSL_EXT.test(fsPath);
 }
 
-/** 该文档是否该排（`.cginc` / 生成文件 / 非 shader 一律不排） */
+/** 用 HLSL 树排的文件：`.cginc` 走**同一棵树**（范围 2 —— 方言差异只体现在覆盖率，不新增解析路径） */
+export function isHlslDialectSource(fsPath: string): boolean {
+  return HLSL_DIALECT_EXT.test(fsPath);
+}
+
+/** CG 方言（统计与健康行 `cg=` 用；不再用于跳过） */
+export function isCgDialectSource(fsPath: string): boolean {
+  return CGINC_EXT.test(fsPath);
+}
+
+/** 该文档是否该排（生成文件 / 非 shader 一律不排；`.cginc` 自 2026-10-29 起排） */
 export function formatSkipReason(file: string, text: string, maxBytes = DEFAULT_MAX_FORMAT_FILE_SIZE): string | null {
   if (isGeneratedFile(file)) return 'generated'; // core §7：生成文件不改
-  if (isCgSource(file)) return 'cg-source'; // 范围 2：`.cginc` 不排
-  if (!/\.(shader|hlsl|hlslinc)$/i.test(file)) return 'not-shader';
-  if (Buffer.byteLength(text, 'utf8') > maxBytes) return 'too-large'; // 范围 11
+  if (!/\.(shader|hlsl|hlslinc|cginc)$/i.test(file)) return 'not-shader';
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) return 'too-large'; // 范围 13
   return null;
 }
 
 interface Region {
   startRow: number;
   endRow: number;
-  /** HLSL 区间用 HLSL 树排；其余原样 */
-  kind: 'hlsl' | 'verbatim';
+  /** `hlsl`/`cg` = 用 HLSL 树排；`verbatim` = 整块原样（关键字与正文同行的畸形块） */
+  kind: 'hlsl' | 'cg' | 'verbatim';
   baseDepth: number;
 }
 
 /**
- * 找出 `.shader` 里的 program 区间（范围 2 / 5：HLSL 排、CG 与 GLSL 原样）。
+ * 找出 `.shader` 里的 program 区间（范围 2 / 5：HLSL 与 CG/GLSL 都排，畸形块原样）。
  *
  * **实测**：`program_hlsl` 只有 `kw_hlslprogram` 与 `kw_endhlsl` 两个孩子 ——
  * scanner 吞掉的 HLSL 正文在 ShaderLab 树里**不是节点**（连隐藏叶子都没有）。
@@ -95,13 +111,13 @@ function collectProgramRegions(tree: Tree, src: string[], shellDepthAt: (row: nu
     const startRow = openTail.trim() === '' ? openRow + 1 : openRow;
     const endRow = closeHead.trim() === '' ? closeRow - 1 : closeRow;
     if (endRow < startRow) continue;
-    const isHlsl = n.type.includes('hlsl') && !messy;
+    const kind: Region['kind'] = messy ? 'verbatim' : n.type.includes('hlsl') ? 'hlsl' : 'cg';
     regions.push({
       startRow,
       endRow,
-      kind: isHlsl ? 'hlsl' : 'verbatim',
-      // HLSL 内容比 `HLSLPROGRAM` 那一行深一级
-      baseDepth: isHlsl ? shellDepthAt(openRow) + 1 : 0,
+      kind,
+      // program 内容比关键字那一行深一级
+      baseDepth: kind === 'verbatim' ? 0 : shellDepthAt(openRow) + 1,
     });
   }
   return regions;
@@ -117,7 +133,7 @@ function sameLeafSeq(a: SyntaxNode[], b: SyntaxNode[]): boolean {
   return true;
 }
 
-/** 硬断言 ③：逐行 strip 空白后逐行相同（空行折叠不算内容变化 → 两侧先丢掉空行） */
+/** 硬断言 ③ 的旧口径（三个改行形的开关全关时才用）：逐行 strip 空白后逐行相同 */
 function sameLineContent(a: string, b: string): boolean {
   const norm = (s: string): string[] =>
     s
@@ -132,7 +148,7 @@ function sameLineContent(a: string, b: string): boolean {
 }
 
 function parseFor(file: string, text: string, trees?: FormatRequest['trees']): { tree: Tree; kind: 'hlsl' | 'shaderlab' } {
-  if (isHlslSource(file)) {
+  if (isHlslDialectSource(file)) {
     return { tree: trees?.hlsl ?? parseHlslFile(text), kind: 'hlsl' };
   }
   return { tree: trees?.shaderlab ?? parseShaderLab(text), kind: 'shaderlab' };
@@ -148,8 +164,19 @@ function shouldInjectFailure(): boolean {
   return !!f && fs.existsSync(f);
 }
 
+interface PrintResult {
+  text: string;
+  verbatimLines: number;
+  verbatimBytes: number;
+  cgBytes: number;
+  /** 输出形状自检的违规原因（范围 10 的 ③ 新口径在打印器内的落地）；`null` = 通过 */
+  shape: string | null;
+  tree: Tree;
+  leaves: SyntaxNode[];
+}
+
 /** 排一次（不含复验）；`null` = 结构不足以排版。返回用的树，复验不再重新解析 */
-function printOnce(req: FormatRequest): { text: string; verbatimLines: number; verbatimBytes: number; tree: Tree; leaves: SyntaxNode[] } | null {
+function printOnce(req: FormatRequest): PrintResult | null {
   if (shouldInjectFailure()) throw new Error('injected printer failure');
   const { file, text } = req;
   const switches = req.switches ?? DEFAULT_FORMAT_SWITCHES;
@@ -163,7 +190,19 @@ function printOnce(req: FormatRequest): { text: string; verbatimLines: number; v
   if (parsed.tree.rootNode.children.length === 0) return null;
 
   const shellLeaves: SyntaxNode[] = [];
-  const shellModel = buildLineModel(text, parsed.tree, { macroMatchIndent: switches.macroMatchIndent }, shellLeaves);
+  /** 形状自检（范围 10）：打印器自己排出来的行里，token 之间的 gap 若还有 2+ 空白 → 整次不改 */
+  const shapeIssues: string[] = [];
+  const shellModel = buildLineModel(
+    text,
+    parsed.tree,
+    {
+      macroMatchIndent: switches.macroMatchIndent,
+      intraLineSpacing: switches.intraLineSpacing,
+      braceSplitting: switches.braceSplitting,
+    },
+    shellLeaves,
+    shapeIssues
+  );
 
   // ADR 0007 不可修模式：复用 `errorExemption` 的匹配结果标原样（范围 5）
   const exemptions = req.exemptions ?? new ExemptionTable();
@@ -176,30 +215,32 @@ function printOnce(req: FormatRequest): { text: string; verbatimLines: number; v
   }
 
   const regions = parsed.kind === 'shaderlab' ? collectProgramRegions(parsed.tree, src, (row) => shellModel[row]?.depth ?? 0) : [];
-  // CG / GLSL 与「关键字与正文同行」的畸形块：整块原样（范围 5）
+  // 畸形块（关键字与正文同行）：整块原样（范围 5）
   for (const r of regions) {
     if (r.kind !== 'verbatim') continue;
     for (let row = r.startRow; row <= r.endRow && row < shellModel.length; row++) shellModel[row].verbatim = true;
   }
-  const regionByStart = new Map<number, { region: Region; lines: string[] }>();
+  const regionByStart = new Map<number, { region: Region; lines: string[]; formatted: number[] }>();
   for (const r of regions) {
-    if (r.kind !== 'hlsl') continue;
+    if (r.kind === 'verbatim') continue;
     const regionText = src.slice(r.startRow, r.endRow + 1).join('\n');
     const hlslTree = parseHlslFile(regionText);
-    regionByStart.set(r.startRow, {
-      region: r,
-      lines: printHlslRegion(regionText, hlslTree, switches, req.indent, r.baseDepth),
-    });
+    regionByStart.set(
+      r.startRow,
+      { region: r, ...printHlslRegion(regionText, hlslTree, switches, req.indent, r.baseDepth, shapeIssues) }
+    );
   }
 
   const out: string[] = [];
   let verbatimLines = 0;
   let verbatimBytes = 0;
+  let cgBytes = 0;
   let blanks = 0;
   for (let i = 0; i < src.length; i++) {
     const region = regionByStart.get(i);
     if (region) {
       out.push(...region.lines);
+      if (region.region.kind === 'cg') cgBytes += Buffer.byteLength(region.lines.join('\n'), 'utf8');
       // 区间内已排，跳到区间末
       i = region.region.endRow;
       blanks = 0;
@@ -226,67 +267,71 @@ function printOnce(req: FormatRequest): { text: string; verbatimLines: number; v
       verbatimBytes += Buffer.byteLength(raw, 'utf8');
       continue;
     }
-    // **只换前导空白，从第一个非空白字符到行尾原样保留**：
-    // 实测 `// 注释 ` 的 comment token 含行尾空格、CRLF 文件的 `// 注释\r` 含 `\r` ——
-    // 剥行尾空白会改 token 自身（违反硬断言 ②），所以这里连行尾空白都不碰。
-    const lead = raw.length - raw.trimStart().length;
-    const tail = raw.slice(lead);
-    // 续行对齐列优先（`macroMatchIndent`）；独立 `.hlsl` 也走这条通道，不能只在外层用
-    const prefix =
-      m.alignDepth >= 0
-        ? indentPrefix(m.alignDepth, req.indent) + ' '.repeat(Math.max(0, m.alignExtra))
-        : indentPrefix(m.depth, req.indent);
-    if (switches.braceOnNewLine && parsed.kind === 'hlsl' && tail.endsWith('{') && tail.trimEnd().length > 1) {
-      const head = tail.trimEnd().slice(0, -1).replace(/[ \t]+$/, '');
-      if (head !== '') {
-        const cr = /\r$/.test(tail) ? '\r' : '';
-        out.push(prefix + head + cr);
-        out.push(indentPrefix(m.depth, req.indent) + '{' + cr);
-        continue;
-      }
-    }
-    out.push(prefix + tail);
+    emitFormattedLine(raw, m, switches, req.indent, out, parsed.kind === 'hlsl');
   }
-  return { text: out.join('\n'), verbatimLines, verbatimBytes, tree: parsed.tree, leaves: shellLeaves };
+
+  // 独立 `.cginc` 全文都是 CG 方言
+  if (parsed.kind === 'hlsl' && isCgDialectSource(file)) cgBytes = Buffer.byteLength(out.join('\n'), 'utf8');
+
+  return {
+    text: out.join('\n'),
+    verbatimLines,
+    verbatimBytes,
+    cgBytes,
+    shape: shapeIssues[0] ?? null,
+    tree: parsed.tree,
+    leaves: shellLeaves,
+  };
 }
 
-/** 格式化一个文档（范围 1：整篇一次；失败即不改，范围 10） */
+/** 格式化一个文档（范围 1：整篇一次；失败即不改，范围 12） */
 export function formatDocument(req: FormatRequest): FormatOutcome {
   const skip = formatSkipReason(req.file, req.text, req.maxBytes);
-  if (skip) return { text: null, reason: skip, verbatimBytes: 0, changedBytes: 0, verbatimLines: 0 };
+  const zero = { verbatimBytes: 0, changedBytes: 0, verbatimLines: 0, cgBytes: 0 };
+  if (skip) return { text: null, reason: skip, ...zero };
 
-  let first: ReturnType<typeof printOnce>;
+  let first: PrintResult | null;
   try {
     first = printOnce(req);
   } catch (err) {
-    return { text: null, reason: `error:${(err as Error).message}`, verbatimBytes: 0, changedBytes: 0, verbatimLines: 0 };
+    return { text: null, reason: `error:${(err as Error).message}`, ...zero };
   }
-  if (!first) return { text: null, reason: 'no-structure', verbatimBytes: 0, changedBytes: 0, verbatimLines: 0 };
+  if (!first) return { text: null, reason: 'no-structure', ...zero };
+  if (first.shape) {
+    return { text: null, reason: `output-shape:${first.shape}`, verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
+  }
 
   const switches = req.switches ?? DEFAULT_FORMAT_SWITCHES;
   const outText = first.text;
 
-  // ① 幂等：第二遍自己解析输出文本（顺带得到输出的叶子）
-  let second: ReturnType<typeof printOnce>;
+  // ① 幂等：第二遍自己解析输出文本（顺带得到输出的叶子）。
+  // **必须丢掉 `req.trees`**：调用方缓存的树属于输入文本，拿它去排输出文本会让
+  // 行模型按错位的坐标切 token（2026-10-30 由输出形状自检抓到：`SubShader { Pass { } }`
+  // 被切成 `SubSh d r` 这类乱码行）。
+  let second: PrintResult | null;
   try {
-    second = printOnce({ ...req, text: outText });
+    second = printOnce({ ...req, text: outText, trees: undefined });
   } catch (err) {
-    return { text: null, reason: `error:idempotence:${(err as Error).message}`, verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines };
+    return { text: null, reason: `error:idempotence:${(err as Error).message}`, verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
   }
   if (!second) {
-    return { text: null, reason: 'not-idempotent', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines };
+    return { text: null, reason: 'not-idempotent', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
+  }
+  if (second.shape) {
+    return { text: null, reason: `output-shape:idempotence:${second.shape}`, verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
   }
   // ② token 序列不变：复用两遍各自收集到的叶子，不再第三次走树
   // （实测 2001 行文档上「4 次解析 + 3 次走树」把格式化推到 319ms，压到 150ms 以内靠的就是这些复用）
   if (!sameLeafSeq(first.leaves, second.leaves)) {
-    return { text: null, reason: 'token-sequence-changed', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines };
+    return { text: null, reason: 'token-sequence-changed', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
   }
   if (second.text !== outText) {
-    return { text: null, reason: 'not-idempotent', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines };
+    return { text: null, reason: 'not-idempotent', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
   }
-  // ③ 仅空白变化（`braceOnNewLine` 会移动 `{` 所在行 → 该档由 ② 兜底）
-  if (!switches.braceOnNewLine && !sameLineContent(req.text, outText)) {
-    return { text: null, reason: 'line-content-changed', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines };
+  // ③ 仅空白变化：三个会改行形的开关全关时才用旧口径；否则由 ② + 输出形状自检兜底
+  const shapeChanging = switches.braceOnNewLine || switches.intraLineSpacing || switches.braceSplitting;
+  if (!shapeChanging && !sameLineContent(req.text, outText)) {
+    return { text: null, reason: 'line-content-changed', verbatimBytes: first.verbatimBytes, changedBytes: 0, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
   }
 
   const beforeLines = req.text.split('\n');
@@ -296,7 +341,7 @@ export function formatDocument(req: FormatRequest): FormatOutcome {
     if (beforeLines[i] === afterLines[i]) continue;
     changedBytes += Math.abs(Buffer.byteLength(beforeLines[i] ?? '', 'utf8') - Buffer.byteLength(afterLines[i] ?? '', 'utf8')) + 1;
   }
-  return { text: outText, reason: null, verbatimBytes: first.verbatimBytes, changedBytes, verbatimLines: first.verbatimLines };
+  return { text: outText, reason: null, verbatimBytes: first.verbatimBytes, changedBytes, verbatimLines: first.verbatimLines, cgBytes: first.cgBytes };
 }
 
 /**
@@ -309,8 +354,8 @@ export function formatProbe(req: FormatRequest): string | null {
   return first ? first.text : null;
 }
 
-/** 健康行（范围 12）：每次请求一行 */
+/** 健康行（范围 14）：每次请求一行 */
 export function formatHealthLine(file: string, o: FormatOutcome): string {
   const state = o.text === null ? `skip=${o.reason}` : 'ok';
-  return `[format] file=${file} state=${state} verbatim=${o.verbatimBytes} changed=${o.changedBytes}`;
+  return `[format] file=${file} state=${state} verbatim=${o.verbatimBytes} changed=${o.changedBytes} cg=${o.cgBytes}`;
 }

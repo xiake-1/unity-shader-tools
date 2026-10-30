@@ -37,6 +37,8 @@
       "unityShader.includeDiagnostics": true,
       "unityShader.typeDiagnostics": true,
       "unityShader.formatting.enable": true,
+      "unityShader.formatting.intraLineSpacing": true,
+      "unityShader.formatting.braceSplitting": true,
       "unityShader.autoFixLanguageId": true,
       "unityShader.dxcMacroOverrides": []
     },
@@ -228,6 +230,16 @@
           "minimum": 0,
           "maximum": 2,
           "description": "连续空行的保留上限（0–2）；0 = 块内空行全清"
+        },
+        "unityShader.formatting.intraLineSpacing": {
+          "type": "boolean",
+          "default": true,
+          "description": "行内空白规范化四类：连续空格压成单空格、调用左括号前空格删除、`.` 后空格删除、逗号后补空格。行尾空白与 token 内部（字符串/注释/宏续行）不动；改值即时生效"
+        },
+        "unityShader.formatting.braceSplitting": {
+          "type": "boolean",
+          "default": true,
+          "description": "拆行尾 `}`（`return o;}` → 两行）。`};`、`} else {`、一行内的 `{…}` 不拆；改值即时生效"
         },
         "unityShader.maxFormatFileSize": {
           "type": "number",

@@ -1,9 +1,10 @@
 /**
- * T-059 / T-060 / T-061 / T-062 单测（规格 feature-formatting 的验收标准逐条对应）。
+ * T-059 / T-060 / T-061 / T-062 / T-080 / T-081 / T-082 单测
+ * （规格 feature-formatting 的验收标准逐条对应）。
  *
- * 门槛（`npm run gate:format`）管真实语料的三条硬断言；这里管**开关行为与边界**：
- * 外壳缩进、`state_command` 只改缩进不改 token、`ERROR` 区间原样、4 开关、
- * `.cginc` / 生成文件 / 大文件 / 抛错注入。
+ * 门槛（`npm run gate:format`）管真实语料的硬断言；这里管**开关行为与边界**：
+ * 外壳缩进、`state_command` 只改缩进不改 token、`ERROR` 区间原样、6 开关、
+ * CG/GLSL 区间与 `.cginc` 排版、生成文件 / 大文件 / 抛错注入。
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -78,14 +79,14 @@ describe('T-059 ShaderLab 外壳打印器', () => {
     expect(lines[7]).toBe('    SubShader');
     expect(lines[9]).toBe('        Tags { "RenderType"="Opaque" "Queue"="Geometry" }');
     expect(lines[10]).toBe('        Pass');
-    expect(lines[12]).toBe('            Blend   SrcAlpha    OneMinusSrcAlpha');
+    expect(lines[12]).toBe('            Blend SrcAlpha OneMinusSrcAlpha');
   });
 
-  it('`state_command` 只改缩进不改 token：`Blend …` 与 `Stencil { … }` 两例（验收点名）', () => {
+  it('`state_command` 只改空白不改 token：`Blend …` 与 `Stencil { … }` 两例（验收点名）', () => {
     const r = fmt('D:/x/a.shader', MESSY);
     const lines = r.text!.split('\n');
-    // 内部多余空格原样保留（改它就等于改 token 顺序/内容，语义不在范围）
-    expect(lines[12]).toBe('            Blend   SrcAlpha    OneMinusSrcAlpha');
+    // 2026-10-30 扩范围（范围 7）：token 之间的多余空白压成单空格；token 自身字节与 token 序列不变
+    expect(lines[12]).toBe('            Blend SrcAlpha OneMinusSrcAlpha');
     expect(lines[13]).toBe('            Stencil {');
     expect(lines[14]).toBe('                Ref 255');
     expect(lines[15]).toBe('                Comp Always Pass Replace');
@@ -105,7 +106,7 @@ describe('T-059 ShaderLab 外壳打印器', () => {
     expect(lines[i + 5]).toBe('            ENDHLSL');
   });
 
-  it('`CGPROGRAM` 内容原样（范围 2/5）', () => {
+  it('`CGPROGRAM` 内部排版（范围 2 扩范围；旧「CG 原样」口径作废）', () => {
     const text = [
       'Shader "C"',
       '{',
@@ -114,7 +115,7 @@ describe('T-059 ShaderLab 外壳打印器', () => {
       'Pass',
       '{',
       '        CGPROGRAM',
-      '   float4   f(  )  {  return 0;  }',
+      '   float4   f()  {  return  0;  }',
       '        ENDCG',
       '}',
       '}',
@@ -123,9 +124,13 @@ describe('T-059 ShaderLab 外壳打印器', () => {
     ].join('\n');
     const r = fmt('D:/x/c.shader', text);
     expect(r.reason).toBeNull();
-    const body = r.text!.split('\n').find((l) => l.includes('float4   f('));
-    expect(body).toBe('   float4   f(  )  {  return 0;  }'); // 字节不变
-    expect(r.verbatimLines).toBeGreaterThan(0);
+    const body = r.text!.split('\n').find((l) => l.includes('float4'));
+    // 行内空白归一 + 按块深度缩进（`CGPROGRAM` 在 3 级，其内容深一级 = 16 空格）
+    expect(body).toBe('                float4 f() { return 0; }');
+    // ② token 序列不变是扩范围后的主判据
+    expect(tokensOf(false, r.text!)).toEqual(tokensOf(false, text));
+    // 范围 14：CG 实际排版字节进健康行
+    expect(r.cgBytes).toBeGreaterThan(0);
   });
 });
 
@@ -195,7 +200,7 @@ describe('T-061 原样输出区', () => {
   });
 });
 
-describe('T-060 HLSL 打印器与 4 开关', () => {
+describe('T-060 HLSL 打印器与开关（旧 4 开关；新增 2 开关见 T-081/T-082 组）', () => {
   const HLSL = ['float4 f(float4 a,', '   float4 b) {', 'return a + b;', '', '', '', '}'].join('\n');
 
   it('`braceOnNewLine` 两态（验收点名）', () => {
@@ -232,6 +237,63 @@ describe('T-060 HLSL 打印器与 4 开关', () => {
   });
 });
 
+describe('T-081 行内空白四类 + T-082 拆行尾 `}`（范围 7/8）', () => {
+  const HL = (lines: string[]): string => lines.join('\n') + '\n';
+
+  it('四类各命中一次（验收点名）', () => {
+    const text = HL([
+      'float4   mul(float4 a,float4 b) {',
+      '    return a . b;',
+      '}',
+    ]);
+    const r = fmt('D:/x/s.hlsl', text);
+    expect(r.reason).toBeNull();
+    const out = r.text!.split('\n');
+    expect(out[0]).toBe('float4 mul(float4 a, float4 b) {'); // ① 连续空白压单空格 + ④ 逗号后补空格
+    expect(out[1]).toBe('    return a .b;'); // ③ `.` 与其后继之间的空白删除；`.` **前**的空白不在四类内
+    expect(out[2]).toBe('}');
+    expect(tokensOf(true, r.text!)).toEqual(tokensOf(true, text));
+  });
+
+  it('② 调用左括号前的空格删除：`mul (x)` → `mul(x)`', () => {
+    const r = fmt('D:/x/s2.hlsl', HL(['float4 mul (float4 a) {', '    return a;', '}']));
+    expect(r.reason).toBeNull();
+    expect(r.text!.split('\n')[0]).toBe('float4 mul(float4 a) {');
+  });
+
+  it('`intraLineSpacing: false` → 行内空白逐字节不动（开关关 = 扩范围前行为）', () => {
+    const text = HL(['float4   mul(float4 a,float4 b) {', '    return a;', '}']);
+    const r = fmt('D:/x/s3.hlsl', text, { intraLineSpacing: false, braceSplitting: false });
+    expect(r.reason).toBeNull();
+    expect(r.text).toBe(text);
+  });
+
+  it('拆行尾 `}`：`return v;}` → 两行，且幂等（验收点名）', () => {
+    const text = HL(['v2f vert(v2f v)', '{', '    return   v;}', '']);
+    const r = fmt('D:/x/b1.hlsl', text);
+    expect(r.reason).toBeNull();
+    expect(r.text!.split('\n')).toEqual(['v2f vert(v2f v)', '{', '    return v;', '}', '']);
+    expect(fmt('D:/x/b1.hlsl', r.text!).text).toBe(r.text);
+  });
+
+  it('`};`、一行内 `{…}` 不拆（范围 8 边界；拆了会破幂等）', () => {
+    const text = HL(['struct s { int a; };', 'void f(int x) {', '    if (x) { return; }', '}', '']);
+    const r = fmt('D:/x/b2.hlsl', text);
+    expect(r.reason).toBeNull();
+    const out = r.text!.split('\n');
+    expect(out[0]).toBe('struct s { int a; };');
+    expect(out[2]).toBe('    if (x) { return; }');
+    expect(fmt('D:/x/b2.hlsl', r.text!).text).toBe(r.text);
+  });
+
+  it('`braceSplitting: false` → 行尾 `}` 不拆', () => {
+    const text = HL(['void f() {', '    return;}', '']);
+    const r = fmt('D:/x/b3.hlsl', text, { braceSplitting: false, intraLineSpacing: false });
+    expect(r.reason).toBeNull();
+    expect(r.text!.split('\n')[1]).toBe('    return;}');
+  });
+});
+
 describe('T-062 幂等、失败即不改与边界', () => {
   const FIXTURES: [string, string][] = [
     ['D:/x/a.shader', MESSY],
@@ -248,9 +310,13 @@ describe('T-062 幂等、失败即不改与边界', () => {
     }
   });
 
-  it('`.cginc` → null（范围 2）', () => {
-    expect(formatSkipReason('D:/x/a.cginc', 'float4 f(){return 0;}\n')).toBe('cg-source');
-    expect(fmt('D:/x/a.cginc', 'float4 f(){return 0;}\n').text).toBeNull();
+  it('`.cginc` 现在排版（范围 2 扩范围；旧「`.cginc` → null」口径作废）', () => {
+    expect(formatSkipReason('D:/x/a.cginc', 'float4 f(){return 0;}\n')).toBeNull();
+    const r = fmt('D:/x/a.cginc', 'float4 f(){  return  0;  }\n');
+    expect(r.reason).toBeNull();
+    // `{` **前**补空格不在四类内 → `f(){` 保持粘连（要改就得先改规格范围 7）
+    expect(r.text).toBe('float4 f(){ return 0; }\n');
+    expect(r.cgBytes).toBeGreaterThan(0);
   });
 
   it('`Temp/compiled-x.shader` → null（core §7）', () => {

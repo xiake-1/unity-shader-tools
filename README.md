@@ -9,7 +9,8 @@
 ## 功能 — ShaderLab（`.shader`）
 
 - 语法高亮（关键字、属性、Pass、语义）
-- 格式化文档（幂等，失败即不改）
+- 格式化文档（幂等，失败即不改）：ShaderLab 外壳与 `CGPROGRAM` / `HLSLPROGRAM` / `GLSLPROGRAM` 内部
+  按块深度重排；行内空白规范化与行尾 `}` 拆行（各有开关）
 - 转到定义 / 速览定义（跨文件，跟随 `#include`，支持 CGIncludes 与 Unity 包路径）
 - 悬停查看定义（着色器名、属性、HLSL 符号；常见 Unity 内置函数经随包 CGIncludes 索引）
 - 查找所有引用
@@ -22,7 +23,7 @@
 
 ## 功能 — HLSL（`.hlsl` / `.hlslinc` / `.cginc`）
 
-- 语法高亮与格式化
+- 语法高亮与格式化（`.cginc` 全文同样排版）
 - 跨文件转到定义、悬停、查找所有引用
 - 补全（`.` 后成员、include 路径）
 

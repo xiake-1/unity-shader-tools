@@ -133,12 +133,14 @@ export function activate(context: vscode.ExtensionContext): void {
         maxTypeDiagnosticsPerFile: settings.get<number>('maxTypeDiagnosticsPerFile', 100),
         // 宏覆盖（规格 feature-dxc-macro-overrides 范围 1；默认空列表＝门槛零漂移）
         dxcMacroOverrides: settings.get<string[]>('dxcMacroOverrides', []),
-        // M5 格式化（规格 feature-formatting 范围 7；默认值与 `gate:format` 联动）
+        // M5/M7 格式化（规格 feature-formatting 范围 9；`enable` 默认值与 `gate:format` 联动）
         formatting: {
           enable: settings.get<boolean>('formatting.enable', true),
           braceOnNewLine: settings.get<boolean>('formatting.braceOnNewLine', false),
           macroMatchIndent: settings.get<boolean>('formatting.macroMatchIndent', true),
           keepBlankLines: settings.get<number>('formatting.keepBlankLines', 1),
+          intraLineSpacing: settings.get<boolean>('formatting.intraLineSpacing', true),
+          braceSplitting: settings.get<boolean>('formatting.braceSplitting', true),
         },
         maxFormatFileSize: settings.get<number>('maxFormatFileSize', 1024 * 1024),
       },

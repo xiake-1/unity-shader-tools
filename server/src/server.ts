@@ -51,7 +51,7 @@ import { DxcExemptionTable } from './dxcExemption';
 import {
   formatDocument,
   formatHealthLine,
-  isHlslSource,
+  isHlslDialectSource,
   DEFAULT_MAX_FORMAT_FILE_SIZE,
 } from './formatter';
 import {
@@ -241,6 +241,7 @@ export function start(): void {
   let formatRequests = 0;
   let formatVerbatimBytes = 0;
   let formatChangedBytes = 0;
+  let formatCgBytes = 0;
   /** 语法诊断与类型诊断**共用同一次 publishDiagnostics**（规格约束：合并推送、不互相覆盖残留） */
   const syntaxDiags = new Map<string, Diagnostic[]>();
   const typeDiags = new Map<string, Diagnostic[]>();
@@ -766,7 +767,7 @@ export function start(): void {
     const doc = documents.get(params.textDocument.uri);
     const state = store.get(file);
     const text = doc?.getText() ?? state?.text;
-    const empty = { verbatimBytes: 0, changedBytes: 0, verbatimLines: 0 };
+    const empty = { verbatimBytes: 0, changedBytes: 0, verbatimLines: 0, cgBytes: 0 };
     if (text === undefined) {
       log(formatHealthLine(file, { text: null, reason: 'no-document', ...empty }));
       return null;
@@ -774,7 +775,7 @@ export function start(): void {
     // 只有树与文本一致时才复用（ADR 0001 唯一 CST；不一致就重解析，别拿旧树排版）
     const trees =
       state && state.tree && state.text === text
-        ? isHlslSource(file)
+        ? isHlslDialectSource(file)
           ? { hlsl: state.tree }
           : { shaderlab: state.tree }
         : undefined;
@@ -790,6 +791,7 @@ export function start(): void {
     if (out.text === null || out.text === text) return null;
     formatVerbatimBytes += out.verbatimBytes;
     formatChangedBytes += out.changedBytes;
+    formatCgBytes += out.cgBytes;
     const lines = text.split('\n').length;
     return [TextEdit.replace(Range.create(Position.create(0, 0), Position.create(lines, 0)), out.text)];
   });
@@ -1057,6 +1059,7 @@ export function start(): void {
           requests: formatRequests,
           verbatimBytes: formatVerbatimBytes,
           changedBytes: formatChangedBytes,
+          cgBytes: formatCgBytes,
           switches: settings.formatting,
           maxBytes: settings.maxFormatFileSize,
         },
