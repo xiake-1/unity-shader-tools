@@ -1,5 +1,11 @@
 # 更新日志
 
+## v0.0.8 — 2026-11-10
+
+- 修复 Windows 上「未识别到完整 Unity 工程（editor-path-unknown）」误降级：进程一级的 1500 ms 同步超时连 powershell.exe 启动都不够（实测 1.7~2.0 s），改为异步枚举 + 5 s 超时，initialize 后回填并自动补索引/重发诊断
+- 新增 Hub `secondaryInstallPath.json` 记录的自定义安装根参与扫描（unity.cn / 手动安装的编辑器不再漏检）
+- `unityShader.unityEditorPath` 修改后即时重发现（无需重载窗口）
+
 ## v0.0.7 — 2026-10-30
 
 - 更新插件列表页的更新日志样式：一行一条

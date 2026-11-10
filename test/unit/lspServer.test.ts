@@ -96,6 +96,21 @@ let tmp: string;
 let shaderFile: string;
 let initResult: { capabilities: { textDocumentSync?: number } } | undefined;
 
+/** 降级提示会等「进程级异步回填」落后才发（真机枚举实测 1~2 s）：轮询到它为止 */
+async function waitForDegraded(timeoutMs = 15000): Promise<RpcMessage[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const msgs = client.notifications.filter(
+      (n) =>
+        n.method === 'window/showMessageRequest' &&
+        ((n.params as { message?: string }).message ?? '').includes('未识别到完整 Unity 工程')
+    );
+    if (msgs.length > 0) return msgs;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return [];
+}
+
 beforeAll(async () => {
   expect(fs.existsSync(SERVER), `先构建 server：${SERVER}`).toBe(true);
 
@@ -234,11 +249,13 @@ describe('LSP 生命周期（真实 stdio）', () => {
   });
 
   it('非 Unity 目录：降级提示恰好一次，且不崩溃', async () => {
-    const msgs = client.notifications.filter((n) => n.method === 'window/showMessageRequest');
+    // 降级提示现在等「进程级异步回填」落后才发（Windows 上枚举实测 1~2 s）：等它到
+    const degraded = await waitForDegraded();
+    const texts = client.notifications
+      .filter((n) => n.method === 'window/showMessageRequest')
+      .map((n) => (n.params as { message?: string }).message ?? '');
     // 按内容钉「降级提示」本身恰好一次；其它弹窗（如 dxc 不可用提示）不在这条断言口径内，
     // 但失败时把全部消息打出来，便于定位多出来的那条是什么。
-    const texts = msgs.map((n) => (n.params as { message?: string }).message ?? '');
-    const degraded = msgs.filter((n) => ((n.params as { message?: string }).message ?? '').includes('未识别到完整 Unity 工程'));
     expect(degraded.length, `实际弹窗消息=${JSON.stringify(texts)}`).toBe(1);
     expect((degraded[0].params as { type: number }).type).toBe(3); // Information
     expect(proc.exitCode).toBeNull();
@@ -266,6 +283,7 @@ describe('LSP 生命周期（真实 stdio）', () => {
     expect(builtin === null || builtin.length === 0, '内置符号在降级态应返回空而不是报错').toBe(true);
 
     // 降级提示仍然只有一条：definition 不产生新的弹窗（按内容过滤，口径同上）
+    await waitForDegraded();
     const texts = client.notifications
       .filter((n) => n.method === 'window/showMessageRequest')
       .map((n) => (n.params as { message?: string }).message ?? '');

@@ -20,7 +20,11 @@ import * as path from 'path';
 
 import { DocumentStore } from './documentStore';
 import { SymbolIndex } from './symbolIndex';
-import { discoverUnityEnvironment, type UnityEnvironment } from './unityProject';
+import {
+  discoverUnityEnvironment,
+  findEditorDirWithSourceAsync,
+  type UnityEnvironment,
+} from './unityProject';
 import { resolveInclude, type IncludeContext } from './includeResolver';
 import { isGeneratedFile, isCgSource } from './tempFiles';
 import { provideDefinition, docTrees } from './definition';
@@ -205,6 +209,11 @@ export function start(): void {
   };
   let indexing = false;
   let degradeNotified = false;
+  /** initialize 时记下的 workspace/活动文件：进程级异步回填与设置变更重发现都要用 */
+  let wsFolders: string[] = [];
+  let lastInitFile: string | null = null;
+  /** 前三级（config/Hub/扫描）落空且用户没配路径 → initialized 后异步补进程一级 */
+  let processRefreshPending = false;
 
   const includeCtx = (): IncludeContext => ({
     projectRoot: env.projectRoot,
@@ -585,6 +594,66 @@ export function start(): void {
     setImmediate(tick);
   };
 
+  /** 当前 workspace 根集合（进程一级要拿它对 `-projectPath`） */
+  const discoveryRoots = (): string[] => [
+    ...new Set([...wsFolders, ...(env.projectRoot ? [env.projectRoot] : [])].filter(Boolean)),
+  ];
+
+  /** 进程一级异步回填（2026-11-10 超时 bug 的修复）：initialize 前三级落空且用户
+   *  没配路径时，initialized 之后再试一次「运行中的编辑器进程」。命中则升级 env、
+   *  把内置/包内源补进索引，并对已打开文档重发语法/include/类型诊断。 */
+  const refreshEditorFromRunningProcess = async (): Promise<boolean> => {
+    const found = await findEditorDirWithSourceAsync(
+      env.editorVersion,
+      { configuredEditorPath: settings.unityEditorPath },
+      discoveryRoots()
+    );
+    if (!found.dir) return false;
+    const cg = path.join(found.dir, 'Data', 'CGIncludes');
+    const cgDir = fs.existsSync(cg) ? cg : null;
+    env = {
+      ...env,
+      editorDir: found.dir,
+      cgIncludesDir: cgDir,
+      editorPathSource: found.source,
+      degradedReasons: env.degradedReasons.filter(
+        (r) => r !== 'editor-path-unknown' && r !== 'cgincludes-missing'
+      ),
+    };
+    if (!cgDir) env = { ...env, degradedReasons: [...env.degradedReasons, 'cgincludes-missing'] };
+    log(`editor resolved late via=${found.source} dir=${found.dir} cg=${cgDir ?? 'null'}`);
+    runBackgroundIndex(); // 内置 CGIncludes / PackageCache(URP) 源补进索引
+    for (const file of openUris.keys()) {
+      publishNow(file); // include 诊断按新搜索根重算（规格范围 5）
+      void runTypeDiagnostics(file);
+    }
+    return true;
+  };
+
+  /** 设置里 `unityEditorPath` 变更后重发现（不用重载窗口）：同步三级 + 必要时再补异步进程级。 */
+  const rediscoverEditor = (): void => {
+    env = discoverUnityEnvironment(lastInitFile, wsFolders, {
+      configuredEditorPath: settings.unityEditorPath,
+    });
+    log(
+      `re-discovered: projectRoot=${env.projectRoot ?? 'null'} editor-path-source=${
+        env.editorPathSource
+      } degraded=${env.degradedReasons.join(',') || 'no'}`
+    );
+    runBackgroundIndex();
+    for (const file of openUris.keys()) {
+      publishNow(file);
+      void runTypeDiagnostics(file);
+    }
+    if (!env.editorDir && !settings.unityEditorPath) {
+      void refreshEditorFromRunningProcess().then((ok) => {
+        if (!ok) notifyDegraded();
+      });
+    } else {
+      notifyDegraded();
+    }
+  };
+
   connection.onInitialize((params: InitializeParams): InitializeResult => {
     const workspaceFolders = (params.workspaceFolders ?? []).map((f) => uriToFsPath(f.uri));
     const initOpts = (params.initializationOptions ?? {}) as {
@@ -599,6 +668,8 @@ export function start(): void {
     const exp = (params.capabilities?.experimental ?? {}) as Record<string, unknown>;
     clientWantsInactive = exp[INACTIVE_REGIONS_NOTIFICATION] === true;
     const initFile = initOpts.activeFile ? uriToFsPath(String(initOpts.activeFile)) : null;
+    wsFolders = workspaceFolders;
+    lastInitFile = initFile;
     env = discoverUnityEnvironment(initFile, workspaceFolders, {
       configuredEditorPath: settings.unityEditorPath,
     });
@@ -607,7 +678,11 @@ export function start(): void {
         env.editorVersion ?? 'null'
       } editor-path-source=${env.editorPathSource} degraded=${env.degradedReasons.join(',') || 'no'}`
     );
-    notifyDegraded();
+    // 进程一级不在 initialize 关键路径上跑（powershell 启动就 1.7~2 s）：
+    // 前三级落空且用户没配路径 → 挪到 initialized 后异步回填，通知也等它落地再发，
+    // 免得进程级本可恢复却先弹一条降级提示。
+    processRefreshPending = !env.editorDir && !settings.unityEditorPath;
+    if (!processRefreshPending) notifyDegraded();
     return {
       capabilities: {
         textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -643,6 +718,13 @@ export function start(): void {
     startKeywordPolling();
     // 类型诊断：定位并探活 dxc（失败 → 一次性提示 + `dxc=missing`，其余功能不受影响）
     void resolveDxcTool();
+    // 进程一级异步回填（见 onInitialize 注释）：命中 → 补索引/重发诊断；未命中 → 这时才发降级提示
+    if (processRefreshPending) {
+      processRefreshPending = false;
+      void refreshEditorFromRunningProcess().then((ok) => {
+        if (!ok) notifyDegraded();
+      });
+    }
   });
 
   connection.onDidChangeConfiguration((change) => {
@@ -650,6 +732,7 @@ export function start(): void {
     const prevDxcPath = settings.dxcPath;
     const prevType = settings.typeDiagnostics;
     const prevFormatEnable = settings.formatting.enable;
+    const prevEditorPath = settings.unityEditorPath;
     const prevOverridesKey = JSON.stringify(settings.dxcMacroOverrides ?? []);
     settings = { ...DEFAULT_SETTINGS, ...next };
     settings.formatting = normalizeFormatSwitches(next.formatting ?? DEFAULT_SETTINGS.formatting);
@@ -661,6 +744,11 @@ export function start(): void {
         `dxcTimeout=${settings.dxcTimeoutMs} maxTypeDiag=${settings.maxTypeDiagnosticsPerFile} ` +
         `format=${settings.formatting.enable} maxFormatFile=${settings.maxFormatFileSize}`
     );
+    // `unityEditorPath` 改了 → 立即重发现（config 是最高级；重发现后允许降级提示再出现一次）
+    if (settings.unityEditorPath !== prevEditorPath) {
+      degradeNotified = false;
+      rediscoverEditor();
+    }
     // 格式化能力在 initialize 定死：改开关只记提示，不假装即时生效（规格异常表）
     if (settings.formatting.enable !== prevFormatEnable) {
       log('format=capability-reload-required');

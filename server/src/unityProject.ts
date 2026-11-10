@@ -11,7 +11,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 
 export interface UnityEnvironment {
   projectRoot: string | null;
@@ -36,7 +36,7 @@ export interface DiscoveryOptions {
   noDefaultEditorRoots?: boolean;
   /** 测试注入：假进程表（thunk，便于断言「配置有值时一次都不调用」） */
   processList?: () => UnityProcessInfo[];
-  /** 进程枚举超时（默认 1500 ms，规格约束） */
+  /** 进程枚举超时（默认 5000 ms；见 PROCESS_TIMEOUT_MS 的 2026-11-10 实测说明） */
   processTimeoutMs?: number;
 }
 
@@ -193,12 +193,21 @@ export function defaultEditorRoots(
 
 /* ---------------- T-073：运行中 Unity 进程一级（规格范围 9） ----------------
  * 优先级固定：用户配置 > **运行中进程** > Hub 安装表 > 平台默认安装根扫描。
- * 进程枚举是**短命工具子进程**（ADR 0010 的界定）：超时 1500 ms、结果缓存 ≥ 5 s、
+ * 进程枚举是**短命工具子进程**（ADR 0010 的界定）：带超时、结果缓存 ≥ 5 s、
  * 失败/超时直接降级到 Hub + 安装根链，不重试成环、不常驻。
+ *
+ * 2026-11-10 真机修复（editor-path-unknown 误降级）：旧 1500 ms 超时会被
+ * **powershell.exe 自身启动**吃掉——同一条枚举命令在 Windows 实测 1.7~2.0 s
+ * （查询本身只有几百字节），进程一级整级超时落空。调整：
+ *  - 超时放宽到 5000 ms；
+ *  - 真机枚举走**异步** execFile；同步链（initialize 关键路径）只接受
+ *    `processList` 注入的假表（测试路径），绝不再同步 spawn powershell；
+ *  - server 端把进程一级挪到 initialize 之后异步回填
+ *    （见 server.ts 的 refreshEditorFromRunningProcess）。
  */
-const PROCESS_TIMEOUT_MS = 1500;
+const PROCESS_TIMEOUT_MS = 5000;
 const PROCESS_CACHE_TTL_MS = 5000;
-let processCache: { expiresAt: number; infos: UnityProcessInfo[] | null } | null = null;
+let processCache: { expiresAt: number; promise: Promise<UnityProcessInfo[] | null> } | null = null;
 
 /** 测试用：清掉进程枚举缓存（默认 5 s TTL，用例之间必须互不污染） */
 export function clearUnityProcessCache(): void {
@@ -254,67 +263,83 @@ function editorDirFromExecutable(exe: string): string | null {
   return null;
 }
 
-/** 一次性枚举 Unity 进程（真机路径；测试用 `processList` 注入假表，不走这里） */
-function listUnityProcesses(timeoutMs: number): UnityProcessInfo[] | null {
-  if (processCache && Date.now() < processCache.expiresAt) return processCache.infos;
-  let infos: UnityProcessInfo[] | null = null;
-  try {
+/** 一次性枚举 Unity 进程（真机路径；测试用 `processList` 注入假表，不走这里）。
+ *  异步版：超时/无权限/命令不存在 → resolve(null)，不抛错；并发调用共享同一在途 Promise。 */
+function listUnityProcessesAsync(timeoutMs: number): Promise<UnityProcessInfo[] | null> {
+  if (processCache && Date.now() < processCache.expiresAt) return processCache.promise;
+  const parseWindows = (out: string): UnityProcessInfo[] | null => {
+    const trimmed = out.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed.startsWith('[') ? trimmed : `[${trimmed}]`);
+      return (Array.isArray(parsed) ? parsed : [parsed])
+        .filter((x: { pid?: number }) => typeof x?.pid === 'number')
+        .map((x: { pid: number; cmd?: string; exe?: string }) => ({
+          pid: x.pid,
+          commandLine: x.cmd ?? '',
+          executablePath: x.exe ?? null,
+        }));
+    } catch {
+      return null;
+    }
+  };
+  const parseUnix = (out: string): UnityProcessInfo[] =>
+    out
+      .split(/\r?\n/)
+      .map((line) => {
+        const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+        if (!m) return null;
+        const argv = tokenizeCommandLine(m[2])[0] ?? '';
+        return {
+          pid: Number(m[1]),
+          commandLine: m[2],
+          executablePath: argv.startsWith('/') ? argv : null,
+        };
+      })
+      .filter((x): x is UnityProcessInfo => x !== null)
+      .filter((x) => /(^|\/)Unity$/.test(x.commandLine.trim().split(/\s+/)[0] ?? ''));
+
+  const probe = new Promise<UnityProcessInfo[] | null>((resolve) => {
     if (process.platform === 'win32') {
       const ps =
         'Get-CimInstance Win32_Process -Filter "Name=\'Unity.exe\'" | ' +
         'ForEach-Object { [pscustomobject]@{ pid=$_.ProcessId; cmd=$_.CommandLine; exe=$_.ExecutablePath } } | ' +
         'ConvertTo-Json -Compress';
-      const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-        encoding: 'utf8',
-        timeout: timeoutMs,
-        windowsHide: true,
-        maxBuffer: 4 * 1024 * 1024,
-      }).trim();
-      if (out) {
-        const parsed = JSON.parse(out.startsWith('[') ? out : `[${out}]`);
-        infos = (Array.isArray(parsed) ? parsed : [parsed])
-          .filter((x: { pid?: number }) => typeof x?.pid === 'number')
-          .map((x: { pid: number; cmd?: string; exe?: string }) => ({
-            pid: x.pid,
-            commandLine: x.cmd ?? '',
-            executablePath: x.exe ?? null,
-          }));
-      } else {
-        infos = [];
-      }
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', ps],
+        {
+          encoding: 'utf8',
+          timeout: timeoutMs,
+          windowsHide: true,
+          maxBuffer: 4 * 1024 * 1024,
+        },
+        (err, out) => {
+          resolve(err ? null : parseWindows(out));
+        }
+      );
     } else {
-      const out = execFileSync('ps', ['-axo', 'pid=,args='], { encoding: 'utf8', timeout: timeoutMs });
-      infos = out
-        .split(/\r?\n/)
-        .map((line) => {
-          const m = /^\s*(\d+)\s+(.*)$/.exec(line);
-          if (!m) return null;
-          const argv = tokenizeCommandLine(m[2])[0] ?? '';
-          return {
-            pid: Number(m[1]),
-            commandLine: m[2],
-            executablePath: argv.startsWith('/') ? argv : null,
-          };
-        })
-        .filter((x): x is UnityProcessInfo => x !== null)
-        .filter((x) => /(^|\/)Unity$/.test(x.commandLine.trim().split(/\s+/)[0] ?? ''));
+      execFile('ps', ['-axo', 'pid=,args='], { encoding: 'utf8', timeout: timeoutMs }, (err, out) => {
+        resolve(err ? null : parseUnix(out));
+      });
     }
-  } catch {
-    infos = null; // 超时 / 无权限 / 命令不存在 → 降级，不抛错
-  }
-  processCache = { expiresAt: Date.now() + PROCESS_CACHE_TTL_MS, infos };
-  return infos;
+  });
+  // 在途期间就进缓存（并发调用不重复 spawn），落地后 TTL 重新起算；失败(null)同样缓存到 TTL 再重试
+  processCache = { expiresAt: Date.now() + Math.max(PROCESS_CACHE_TTL_MS, timeoutMs), promise: probe };
+  void probe.then((infos) => {
+    if (processCache && processCache.promise === probe) {
+      processCache = { expiresAt: Date.now() + PROCESS_CACHE_TTL_MS, promise: probe };
+    }
+    return infos;
+  });
+  return probe;
 }
 
-/** 运行中且属于**当前 workspace** 的编辑器目录（对不上工程的一律不用） */
-export function runningEditorDirs(
-  opts: DiscoveryOptions = {},
-  workspaceRoots: string[] = []
+/** 把进程表收敛成「属于当前 workspace 的编辑器目录」（对不上工程的一律不用） */
+function filterRunningEditorDirs(
+  infos: UnityProcessInfo[],
+  workspaceRoots: string[]
 ): Array<{ dir: string; pid: number }> {
-  const infos = opts.processList
-    ? opts.processList()
-    : listUnityProcesses(opts.processTimeoutMs ?? PROCESS_TIMEOUT_MS);
-  if (!infos) return [];
   const out: Array<{ dir: string; pid: number }> = [];
   for (const p of infos) {
     if (isExcludedUnityProcess(p.commandLine)) continue;
@@ -328,10 +353,34 @@ export function runningEditorDirs(
   return out;
 }
 
+/** 同步版：只接受 `processList` 注入的假表（测试用）。真机进程发现走异步版，
+ *  绝不在 initialize 关键路径上 spawn powershell。 */
+export function runningEditorDirs(
+  opts: DiscoveryOptions = {},
+  workspaceRoots: string[] = []
+): Array<{ dir: string; pid: number }> {
+  if (!opts.processList) return [];
+  return filterRunningEditorDirs(opts.processList(), workspaceRoots);
+}
+
+/** 运行中且属于**当前 workspace** 的编辑器目录（真机路径；带在途缓存） */
+export async function runningEditorDirsAsync(
+  opts: DiscoveryOptions = {},
+  workspaceRoots: string[] = []
+): Promise<Array<{ dir: string; pid: number }>> {
+  const infos = opts.processList
+    ? opts.processList()
+    : await listUnityProcessesAsync(opts.processTimeoutMs ?? PROCESS_TIMEOUT_MS);
+  if (!infos) return [];
+  return filterRunningEditorDirs(infos, workspaceRoots);
+}
+
 /** 发现链 + 来源标记（规格范围 9 的五值口径）。
  *  注意 `configuredEditorPath` 有值时**进程一级完全不参与**（规格异常表）：
  *  即便配置的路径无效、后面几级把目录救回来了，来源仍记 `config`——
- *  用户的显式配置不该被进程探测「救」，日志要能看出这一点。 */
+ *  用户的显式配置不该被进程探测「救」，日志要能看出这一点。
+ *  同步版进程一级只在注入 `processList` 时生效；真机进程发现走
+ *  `findEditorDirWithSourceAsync`。 */
 export function findEditorDirWithSource(
   version: string | null,
   opts: DiscoveryOptions = {},
@@ -353,6 +402,40 @@ export function findEditorDirWithSource(
   return rest;
 }
 
+/** 异步版发现链：进程一级真机枚举（异步 + 5 s 超时），不阻塞调用方事件循环节。 */
+export async function findEditorDirWithSourceAsync(
+  version: string | null,
+  opts: DiscoveryOptions = {},
+  workspaceRoots: string[] = []
+): Promise<{ dir: string | null; source: EditorPathSource }> {
+  if (opts.configuredEditorPath) {
+    const p = opts.configuredEditorPath;
+    const valid = isDir(path.join(p, 'Data', 'CGIncludes')) || (isDir(p) && path.basename(p).toLowerCase() === 'editor');
+    if (valid) return { dir: p, source: 'config' };
+    const fallback = findEditorDirFromHubOrScan(version, opts);
+    return { dir: fallback.dir, source: 'config' };
+  }
+  for (const r of await runningEditorDirsAsync(opts, workspaceRoots)) {
+    return { dir: r.dir, source: 'process' };
+  }
+  return findEditorDirFromHubOrScan(version, opts);
+}
+
+/** Hub 记录的自定义编辑器安装根（`secondaryInstallPath.json`：一个 JSON 字符串路径）。
+ *  unity.cn / 手动安装的编辑器不进 `editors-v2.json` 安装表（2026-11-10 实测：整表缺失
+ *  → hub 级恒空）——把该记录目录加进扫描根，`<root>/<version>/Editor` 一步命中。 */
+function hubSecondaryInstallRoots(hubDir: string): string[] {
+  const f = path.join(hubDir, 'secondaryInstallPath.json');
+  if (!isFile(f)) return [];
+  try {
+    const v: unknown = JSON.parse(fs.readFileSync(f, 'utf8'));
+    return typeof v === 'string' && v.trim() && isDir(v) ? [v] : [];
+  } catch {
+    /* 格式随 Hub 版本变化：解析失败即忽略该来源 */
+    return [];
+  }
+}
+
 function findEditorDirFromHubOrScan(
   version: string | null,
   opts: DiscoveryOptions = {}
@@ -370,6 +453,7 @@ function findEditorDirFromHubOrScan(
 
   const roots = [
     ...(opts.extraEditorRoots ?? []),
+    ...hubSecondaryInstallRoots(hubDir),
     ...(opts.noDefaultEditorRoots ? [] : defaultEditorRoots()),
   ];
   for (const dir of editorsFromScan(version, roots)) {
@@ -382,35 +466,64 @@ export function findEditorDir(version: string | null, opts: DiscoveryOptions = {
   return findEditorDirWithSource(version, opts).dir;
 }
 
-/** 组装完整环境；任何缺失都记录为降级原因，不抛错、不弹窗 */
+/** 工程侧公共部分（同步/异步两条发现链共用） */
+interface ProjectParts {
+  projectRoot: string | null;
+  packageCacheDir: string | null;
+  version: string | null;
+  workspaceRoots: string[];
+}
+
+function projectPartsOf(fsPath: string | null, workspaceFolders: string[]): ProjectParts {
+  const projectRoot = findProjectRoot(fsPath, workspaceFolders);
+  const packageCacheDir = projectRoot ? path.join(projectRoot, 'Library', 'PackageCache') : null;
+  const version = projectRoot ? readEditorVersion(projectRoot) : null;
+  const workspaceRoots = [...new Set([...workspaceFolders, ...(projectRoot ? [projectRoot] : [])].filter(Boolean))];
+  return { projectRoot, packageCacheDir, version, workspaceRoots };
+}
+
+/** 组装完整环境；任何缺失都记录为降级原因（顺序：工程 → 包缓存 → Editor → CGIncludes），不抛错、不弹窗 */
+function assembleUnityEnvironment(
+  parts: ProjectParts,
+  found: { dir: string | null; source: EditorPathSource }
+): UnityEnvironment {
+  const reasons: string[] = [];
+  if (!parts.projectRoot) reasons.push('not-a-unity-project');
+  if (parts.packageCacheDir && !isDir(parts.packageCacheDir)) reasons.push('package-cache-missing');
+  if (!found.dir) reasons.push('editor-path-unknown');
+
+  const cgIncludesDir = found.dir ? path.join(found.dir, 'Data', 'CGIncludes') : null;
+  if (cgIncludesDir && !isDir(cgIncludesDir)) reasons.push('cgincludes-missing');
+
+  return {
+    projectRoot: parts.projectRoot,
+    editorDir: found.dir,
+    cgIncludesDir: cgIncludesDir && isDir(cgIncludesDir) ? cgIncludesDir : null,
+    packageCacheDir: parts.packageCacheDir && isDir(parts.packageCacheDir) ? parts.packageCacheDir : null,
+    editorVersion: parts.version,
+    editorPathSource: found.source,
+    degradedReasons: reasons,
+  };
+}
+
+/** 同步发现：进程一级只在注入 `processList`（测试）时生效；真机进程一级见异步版。 */
 export function discoverUnityEnvironment(
   fsPath: string | null,
   workspaceFolders: string[] = [],
   opts: DiscoveryOptions = {}
 ): UnityEnvironment {
-  const reasons: string[] = [];
-  const projectRoot = findProjectRoot(fsPath, workspaceFolders);
-  if (!projectRoot) reasons.push('not-a-unity-project');
+  const parts = projectPartsOf(fsPath, workspaceFolders);
+  const found = findEditorDirWithSource(parts.version, opts, parts.workspaceRoots);
+  return assembleUnityEnvironment(parts, found);
+}
 
-  const packageCacheDir = projectRoot ? path.join(projectRoot, 'Library', 'PackageCache') : null;
-  if (packageCacheDir && !isDir(packageCacheDir)) reasons.push('package-cache-missing');
-
-  const version = projectRoot ? readEditorVersion(projectRoot) : null;
-  const roots = [...new Set([...workspaceFolders, ...(projectRoot ? [projectRoot] : [])].filter(Boolean))];
-  const found = findEditorDirWithSource(version, opts, roots);
-  const editorDir = found.dir;
-  if (!editorDir) reasons.push('editor-path-unknown');
-
-  const cgIncludesDir = editorDir ? path.join(editorDir, 'Data', 'CGIncludes') : null;
-  if (cgIncludesDir && !isDir(cgIncludesDir)) reasons.push('cgincludes-missing');
-
-  return {
-    projectRoot,
-    editorDir,
-    cgIncludesDir: cgIncludesDir && isDir(cgIncludesDir) ? cgIncludesDir : null,
-    packageCacheDir: packageCacheDir && isDir(packageCacheDir) ? packageCacheDir : null,
-    editorVersion: version,
-    editorPathSource: found.source,
-    degradedReasons: reasons,
-  };
+/** 异步发现：进程一级走真机异步枚举（超时/失败自动降级到 Hub + 安装根链）。 */
+export async function discoverUnityEnvironmentAsync(
+  fsPath: string | null,
+  workspaceFolders: string[] = [],
+  opts: DiscoveryOptions = {}
+): Promise<UnityEnvironment> {
+  const parts = projectPartsOf(fsPath, workspaceFolders);
+  const found = await findEditorDirWithSourceAsync(parts.version, opts, parts.workspaceRoots);
+  return assembleUnityEnvironment(parts, found);
 }

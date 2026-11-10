@@ -11,7 +11,9 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   discoverUnityEnvironment,
+  discoverUnityEnvironmentAsync,
   findEditorDirWithSource,
+  findEditorDirWithSourceAsync,
   isExcludedUnityProcess,
   projectPathOfCommandLine,
   runningEditorDirs,
@@ -160,5 +162,66 @@ describe('T-073 环境组装与日志口径', () => {
     const env = discoverUnityEnvironment(null, [], { processList: () => [] });
     expect(env.editorPathSource).toBe('none');
     expect(env.degradedReasons).toContain('not-a-unity-project');
+  });
+});
+
+describe('2026-11-10 修复：进程级异步化与 secondaryInstallPath 扫描根', () => {
+  it('同步链不再 spawn powershell：不注入假表时快速降级（none）', () => {
+    const t0 = Date.now();
+    const r = findEditorDirWithSource(
+      '2022.3.62f3c1',
+      { noDefaultEditorRoots: true, hubSettingsDir: path.join(root, 'no-hub') },
+      [projectRoot]
+    );
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(r).toEqual({ dir: null, source: 'none' });
+  });
+
+  it('异步链命中注入假进程表 → source=process（真机走异步枚举）', async () => {
+    const r = await findEditorDirWithSourceAsync('2022.3.62f3c1', { processList: () => [MAIN_PROJ()] }, [projectRoot]);
+    expect(r).toEqual({ dir: editorDir, source: 'process' });
+  });
+
+  it('discoverUnityEnvironmentAsync 与同步版口径一致（进程级 → 内置 CGIncludes 可用）', async () => {
+    const env = await discoverUnityEnvironmentAsync(path.join(projectRoot, 'Assets', 'a.shader'), [projectRoot], {
+      processList: () => [MAIN_PROJ()],
+    });
+    expect(env.editorPathSource).toBe('process');
+    expect(env.cgIncludesDir).toBe(path.join(editorDir, 'Data', 'CGIncludes'));
+    // 测试工程没建 Library/PackageCache：只要求 Editor 两级降级原因被消除
+    expect(env.degradedReasons).not.toContain('editor-path-unknown');
+    expect(env.degradedReasons).not.toContain('cgincludes-missing');
+  });
+
+  it('Hub `secondaryInstallPath.json` 记录的根参与扫描（unity.cn/手动安装形态）', () => {
+    const hubFake = path.join(root, 'hub-secondary');
+    fs.mkdirSync(hubFake, { recursive: true });
+    fs.writeFileSync(
+      path.join(hubFake, 'secondaryInstallPath.json'),
+      JSON.stringify(path.join(root, 'UnityEditor')),
+      'utf8'
+    );
+    const r = findEditorDirWithSource(
+      '2022.3.62f3c1',
+      { noDefaultEditorRoots: true, hubSettingsDir: hubFake, processList: () => [] },
+      [projectRoot]
+    );
+    expect(r).toEqual({ dir: editorDir, source: 'scan' });
+  });
+
+  it('`secondaryInstallPath.json` 指向不存在目录 → 忽略该来源，不抛错', () => {
+    const hubFake = path.join(root, 'hub-secondary-bad');
+    fs.mkdirSync(hubFake, { recursive: true });
+    fs.writeFileSync(
+      path.join(hubFake, 'secondaryInstallPath.json'),
+      JSON.stringify('Z:\\no-such-unity-root'),
+      'utf8'
+    );
+    const r = findEditorDirWithSource(
+      '2022.3.62f3c1',
+      { noDefaultEditorRoots: true, hubSettingsDir: hubFake, processList: () => [] },
+      [projectRoot]
+    );
+    expect(r).toEqual({ dir: null, source: 'none' });
   });
 });
